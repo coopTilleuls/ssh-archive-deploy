@@ -1,0 +1,9 @@
+services:
+  ssh:
+    build:
+      context: ./ssh-server
+    ports:
+      - "127.0.0.1::22"
+    volumes:
+      - "${E2E_REMOTE_FIXTURE:?E2E_REMOTE_FIXTURE is required}:/fixture:ro"
+      - "${E2E_AUTHORIZED_KEYS:?E2E_AUTHORIZED_KEYS is required}:/authorized_keys:ro"

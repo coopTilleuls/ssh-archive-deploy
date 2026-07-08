@@ -1,0 +1,62 @@
+amends "package://github.com/jdx/hk/releases/download/v1.49.0/hk@1.49.0#/Config.pkl"
+
+local checks = new Mapping<String, Step> {
+  ["ruff-format"] {
+    glob = List("*.py")
+    check = "uv run ruff format --check {{files}}"
+    fix = "uv run ruff format {{files}}"
+  }
+  ["ruff-check"] {
+    glob = List("*.py")
+    check = "uv run ruff check {{files}}"
+    fix = "uv run ruff check --fix {{files}}"
+  }
+  ["pyrefly"] {
+    glob = List("src/**/*.py", "tests/**/*.py", "pyproject.toml")
+    check = "uv run pyrefly check --summary=none"
+  }
+  ["pytest"] {
+    glob = List("src/**/*.py", "tests/**/*.py", "pyproject.toml")
+    check = "uv run pytest -m 'not e2e'"
+  }
+  ["actionlint"] {
+    glob = List(".github/workflows/*.yml", ".github/workflows/*.yaml")
+    check = "actionlint"
+  }
+  ["action-validator"] {
+    glob = List("action.yml", "action.yaml", ".github/workflows/*.yml", ".github/workflows/*.yaml")
+    check = "action-validator {{files}}"
+  }
+  ["trailing-whitespace"] {
+    glob = List("*")
+    check = "git grep -n '[[:blank:]]$' -- {{files}} && exit 1 || exit 0"
+  }
+  ["merge-conflicts"] {
+    glob = List("*")
+    check = "! git grep -n '^<<<<<<< ' -- {{files}}"
+  }
+  ["private-keys"] {
+    glob = List("*")
+    check = "! git grep -n -E -- '-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----' -- {{files}}"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps = checks
+  }
+  ["pre-push"] {
+    steps = checks
+  }
+  ["check"] {
+    steps = checks
+  }
+  ["fix"] {
+    fix = true
+    steps = checks
+  }
+}
+
+fail_fast = true

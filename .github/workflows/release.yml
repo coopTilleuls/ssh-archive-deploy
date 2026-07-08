@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+
+      - name: Install Python dependencies
+        run: uv sync
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import pathlib,tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          major="${version%%.*}"
+          {
+            echo "version=${version}"
+            echo "tag=v${version}"
+            echo "major-tag=v${major}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check release does not exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${TAG}" >&2
+            exit 1
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release already exists: ${TAG}" >&2
+            exit 1
+          fi
+
+      - name: Run checks
+        run: mise run check
+
+      - name: Build and run PEX E2E tests
+        run: mise run test:e2e:pex
+
+      - name: Smoke test released artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          dist/release/ssh-archive-deploy-linux-x86_64.pex --help >/dev/null
+          (
+            cd dist/release
+            sha256sum --check ssh-archive-deploy-linux-x86_64.pex.sha256
+          )
+
+      - name: Generate artifact attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/release/ssh-archive-deploy-linux-x86_64.pex
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          MAJOR_TAG: ${{ steps.version.outputs.major-tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$(git rev-parse HEAD)"
+          gh release create "${TAG}" \
+            dist/release/ssh-archive-deploy-linux-x86_64.pex \
+            dist/release/ssh-archive-deploy-linux-x86_64.pex.sha256 \
+            --target "${target}" \
+            --title "${TAG}" \
+            --notes "Release ${TAG}"
+
+          git tag --force "${MAJOR_TAG}" "${target}"
+          git push --force origin "refs/tags/${MAJOR_TAG}"

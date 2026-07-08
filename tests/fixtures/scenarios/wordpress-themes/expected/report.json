@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "project": "e2e-wordpress-themes",
+  "release_id": "e2e-wordpress-themes",
+  "strategy": {
+    "apply": "overlay",
+    "delete_unknown": false
+  },
+  "summary": {
+    "changed_files": 3,
+    "artifact_only_files": 1,
+    "remote_only_files": 2,
+    "text_changed_files": 2,
+    "binary_changed_files": 1,
+    "insertions": 2,
+    "deletions": 2
+  },
+  "scopes": [
+    {
+      "name": "public-theme",
+      "target": "wp-content/themes/public-theme",
+      "summary": {
+        "changed_files": 2,
+        "artifact_only_files": 1,
+        "remote_only_files": 1,
+        "text_changed_files": 1,
+        "binary_changed_files": 1,
+        "insertions": 1,
+        "deletions": 1
+      },
+      "changed_files": [
+        "wp-content/themes/public-theme/images/logo.dat",
+        "wp-content/themes/public-theme/index.php"
+      ],
+      "changed_text_files": [
+        "wp-content/themes/public-theme/index.php"
+      ],
+      "changed_binary_files": [
+        "wp-content/themes/public-theme/images/logo.dat"
+      ],
+      "artifact_only_files": [
+        "wp-content/themes/public-theme/added.php"
+      ],
+      "remote_only_files": [
+        "wp-content/themes/public-theme/remote-only.php"
+      ],
+      "text_line_changes": [
+        {
+          "path": "wp-content/themes/public-theme/index.php",
+          "insertions": 1,
+          "deletions": 1
+        }
+      ]
+    },
+    {
+      "name": "secondary-theme",
+      "target": "wp-content/themes/secondary-theme",
+      "summary": {
+        "changed_files": 1,
+        "artifact_only_files": 0,
+        "remote_only_files": 1,
+        "text_changed_files": 1,
+        "binary_changed_files": 0,
+        "insertions": 1,
+        "deletions": 1
+      },
+      "changed_files": [
+        "wp-content/themes/secondary-theme/page.php"
+      ],
+      "changed_text_files": [
+        "wp-content/themes/secondary-theme/page.php"
+      ],
+      "changed_binary_files": [],
+      "artifact_only_files": [],
+      "remote_only_files": [
+        "wp-content/themes/secondary-theme/remote-only.php"
+      ],
+      "text_line_changes": [
+        {
+          "path": "wp-content/themes/secondary-theme/page.php",
+          "insertions": 1,
+          "deletions": 1
+        }
+      ]
+    }
+  ]
+}

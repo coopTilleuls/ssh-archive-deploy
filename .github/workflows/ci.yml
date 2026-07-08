@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+      - name: Install Python dependencies
+        run: uv sync
+      - name: Run checks
+        run: mise run check
+      - name: Check mise lockfile
+        run: |
+          mise lock
+          git diff --exit-code -- mise.lock
+
+  e2e:
+    name: E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+      - name: Install Python dependencies
+        run: uv sync
+      - name: Check Docker Compose
+        run: docker compose version
+      - name: Run E2E tests
+        run: mise run test:e2e
+
+  pex:
+    name: PEX
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+      - name: Install Python dependencies
+        run: uv sync
+      - name: Build and run PEX E2E tests
+        run: mise run test:e2e:pex

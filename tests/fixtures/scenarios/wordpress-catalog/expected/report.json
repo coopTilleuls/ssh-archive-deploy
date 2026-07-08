@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "project": "e2e-wordpress-catalog",
+  "release_id": "e2e-wordpress-catalog",
+  "strategy": {
+    "apply": "overlay",
+    "delete_unknown": false
+  },
+  "summary": {
+    "changed_files": 3,
+    "artifact_only_files": 2,
+    "remote_only_files": 3,
+    "text_changed_files": 3,
+    "binary_changed_files": 0,
+    "insertions": 3,
+    "deletions": 3
+  },
+  "scopes": [
+    {
+      "name": "root-static",
+      "target": ".",
+      "summary": {
+        "changed_files": 1,
+        "artifact_only_files": 1,
+        "remote_only_files": 1,
+        "text_changed_files": 1,
+        "binary_changed_files": 0,
+        "insertions": 1,
+        "deletions": 1
+      },
+      "changed_files": [
+        "index.html"
+      ],
+      "changed_text_files": [
+        "index.html"
+      ],
+      "changed_binary_files": [],
+      "artifact_only_files": [
+        "images/logo.svg"
+      ],
+      "remote_only_files": [
+        "images/remote-only.svg"
+      ],
+      "text_line_changes": [
+        {
+          "path": "index.html",
+          "insertions": 1,
+          "deletions": 1
+        }
+      ]
+    },
+    {
+      "name": "wordpress-theme",
+      "target": "wordpress/wp-content/themes/custom-theme",
+      "summary": {
+        "changed_files": 1,
+        "artifact_only_files": 0,
+        "remote_only_files": 1,
+        "text_changed_files": 1,
+        "binary_changed_files": 0,
+        "insertions": 1,
+        "deletions": 1
+      },
+      "changed_files": [
+        "wordpress/wp-content/themes/custom-theme/index.php"
+      ],
+      "changed_text_files": [
+        "wordpress/wp-content/themes/custom-theme/index.php"
+      ],
+      "changed_binary_files": [],
+      "artifact_only_files": [],
+      "remote_only_files": [
+        "wordpress/wp-content/themes/custom-theme/remote-only.php"
+      ],
+      "text_line_changes": [
+        {
+          "path": "wordpress/wp-content/themes/custom-theme/index.php",
+          "insertions": 1,
+          "deletions": 1
+        }
+      ]
+    },
+    {
+      "name": "catalog-app",
+      "target": "catalog",
+      "summary": {
+        "changed_files": 1,
+        "artifact_only_files": 1,
+        "remote_only_files": 1,
+        "text_changed_files": 1,
+        "binary_changed_files": 0,
+        "insertions": 1,
+        "deletions": 1
+      },
+      "changed_files": [
+        "catalog/index.php"
+      ],
+      "changed_text_files": [
+        "catalog/index.php"
+      ],
+      "changed_binary_files": [],
+      "artifact_only_files": [
+        "catalog/new.php"
+      ],
+      "remote_only_files": [
+        "catalog/runtime-cache.php"
+      ],
+      "text_line_changes": [
+        {
+          "path": "catalog/index.php",
+          "insertions": 1,
+          "deletions": 1
+        }
+      ]
+    }
+  ]
+}

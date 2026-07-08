@@ -1,0 +1,27 @@
+version: 1
+
+project: e2e-wordpress-themes
+
+remote:
+  root: /srv/project
+  workdir: /srv/deploy
+
+strategy:
+  apply: overlay
+  delete_unknown: false
+
+backup:
+  retention: 3
+  baseline_id: server-baseline-before-ci
+
+scope:
+  - name: public-theme
+    source: src/wp-content/themes/public-theme
+    target: wp-content/themes/public-theme
+
+  - name: secondary-theme
+    source: src/wp-content/themes/secondary-theme
+    target: wp-content/themes/secondary-theme
+
+exclude:
+  - .git/**

@@ -1,0 +1,30 @@
+[tools]
+python = "3.12"
+uv = "latest"
+actionlint = "latest"
+action-validator = "0.9.0"
+hk = "latest"
+
+[tasks.check]
+run = "hk check --all"
+
+[tasks.fix]
+run = "hk fix --all --no-stage"
+
+[tasks.test]
+run = "uv run pytest -m 'not e2e'"
+
+[tasks."build:pex"]
+run = "uv run --frozen --no-default-groups --group release python scripts/build_pex.py"
+
+[tasks."test:e2e"]
+run = "uv run pytest -m e2e tests/e2e"
+
+[tasks."test:e2e:pex"]
+run = """
+mise run build:pex
+SSH_ARCHIVE_DEPLOY_E2E_EXECUTABLE="$PWD/dist/release/ssh-archive-deploy-linux-x86_64.pex" uv run pytest -m e2e tests/e2e
+"""
+
+[tasks.lock]
+run = "mise lock"

@@ -1,0 +1,45 @@
+version: 1
+
+project: e2e-wordpress-catalog
+
+remote:
+  root: /srv/project
+  workdir: /srv/deploy
+
+strategy:
+  apply: overlay
+  delete_unknown: false
+
+backup:
+  retention: 3
+  baseline_id: server-baseline-before-ci
+
+scope:
+  - name: root-static
+    source: .
+    target: .
+    include:
+      - index.html
+      - robots.txt
+      - images/**
+
+  - name: wordpress-theme
+    source: wordpress/wp-content/themes/custom-theme
+    target: wordpress/wp-content/themes/custom-theme
+
+  - name: catalog-app
+    source: catalog
+    target: catalog
+    exclude:
+      - setup.php
+      - admin/.htpasswd
+      - admin/filemanager/userfiles/**
+
+exclude:
+  - .git/**
+  - .env
+  - .htpasswd
+  - wordpress/wp-config.php
+  - wordpress/wp-content/uploads/**
+  - catalog/setup.php
+  - catalog/admin/.htpasswd

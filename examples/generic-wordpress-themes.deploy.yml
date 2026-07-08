@@ -1,0 +1,28 @@
+version: 1
+
+project: wordpress-themes
+
+remote:
+  root: /httpdocs
+  workdir: /.deploy/wordpress-themes
+
+strategy:
+  apply: overlay
+  delete_unknown: false
+
+backup:
+  retention: 3
+  baseline_id: server-baseline-before-ci
+
+scope:
+  - name: public-theme
+    source: src/wp-content/themes/public-theme
+    target: wp-content/themes/public-theme
+
+  - name: secondary-theme
+    source: src/wp-content/themes/secondary-theme
+    target: wp-content/themes/secondary-theme
+
+exclude:
+  - .git/**
+  - .env

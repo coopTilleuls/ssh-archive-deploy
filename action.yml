@@ -1,0 +1,249 @@
+name: SSH Archive Deploy
+description: Build, report, apply, and rollback a scoped deployment archive over SSH.
+
+inputs:
+  mode:
+    description: Deployment mode. Supported values are report, apply, and rollback.
+    required: true
+    default: report
+  config:
+    description: Path to the deploy.yml configuration.
+    required: true
+    default: deploy.yml
+  archive:
+    description: Path to the generated or existing archive.
+    required: true
+    default: dist/site.tar.gz
+  report-dir:
+    description: Directory where report artifacts are written.
+    required: false
+    default: dist/deploy-report
+  rollback-release:
+    description: Reserved rollback target input.
+    required: false
+    default: latest
+  ssh-host:
+    description: SSH host.
+    required: false
+  ssh-user:
+    description: SSH user.
+    required: false
+  ssh-port:
+    description: SSH port.
+    required: false
+    default: "22"
+  ssh-private-key:
+    description: SSH private key content.
+    required: false
+  ssh-known-hosts:
+    description: Known hosts content. Required for apply and rollback.
+    required: false
+  github-token:
+    description: Token used to download release assets for private action repositories.
+    required: false
+
+outputs:
+  release-id:
+    description: Release id from the generated manifest.
+    value: ${{ steps.export.outputs.release-id }}
+  manifest-path:
+    description: Manifest path written by the CLI.
+    value: ${{ steps.export.outputs.manifest-path }}
+  report-dir:
+    description: Report directory.
+    value: ${{ inputs.report-dir }}
+  transaction-id:
+    description: Transaction id written by apply or rollback.
+    value: ${{ steps.export.outputs.transaction-id }}
+  checkpoint-path:
+    description: Remote checkpoint path written by apply or rollback.
+    value: ${{ steps.export.outputs.checkpoint-path }}
+  rollback-command:
+    description: Rollback command hint for apply mode.
+    value: ${{ steps.export.outputs.rollback-command }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+
+    - name: Install ssh-archive-deploy
+      id: install
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        if [ "${RUNNER_OS}" != "Linux" ] || [ "${RUNNER_ARCH}" != "X64" ]; then
+          echo "Unsupported runner: ${RUNNER_OS}/${RUNNER_ARCH}" >&2
+          exit 1
+        fi
+
+        version="$(
+          python -c 'import pathlib,tomllib; print(tomllib.loads(pathlib.Path("'"$GITHUB_ACTION_PATH"'/pyproject.toml").read_text())["project"]["version"])'
+        )"
+
+        asset="ssh-archive-deploy-linux-x86_64.pex"
+        install_dir="$RUNNER_TEMP/ssh-archive-deploy"
+        tag="v${version}"
+
+        mkdir -p "$install_dir"
+
+        GH_TOKEN="${DOWNLOAD_TOKEN}" gh release download "${tag}" \
+          --repo "${ACTION_REPOSITORY}" \
+          --pattern "${asset}" \
+          --pattern "${asset}.sha256" \
+          --dir "${install_dir}" \
+          --clobber
+
+        (
+          cd "$install_dir"
+          sha256sum --check "$asset.sha256"
+        )
+
+        tag_ref="repos/${ACTION_REPOSITORY}/git/ref/tags/${tag}"
+        expected_source_digest="$(GH_TOKEN="${DOWNLOAD_TOKEN}" gh api "$tag_ref" --jq .object.sha)"
+        tag_object_type="$(GH_TOKEN="${DOWNLOAD_TOKEN}" gh api "$tag_ref" --jq .object.type)"
+        if [ "$tag_object_type" = "tag" ]; then
+          expected_source_digest="$(
+            GH_TOKEN="${DOWNLOAD_TOKEN}" gh api \
+              "repos/${ACTION_REPOSITORY}/git/tags/${expected_source_digest}" \
+              --jq .object.sha
+          )"
+        fi
+
+        GH_TOKEN="${DOWNLOAD_TOKEN}" gh attestation verify "$install_dir/$asset" \
+          --repo "${ACTION_REPOSITORY}" \
+          --signer-workflow "${ACTION_REPOSITORY}/.github/workflows/release.yml" \
+          --source-digest "${expected_source_digest}" \
+          --deny-self-hosted-runners
+
+        chmod +x "$install_dir/$asset"
+
+        echo "binary=$install_dir/$asset" >> "$GITHUB_OUTPUT"
+      env:
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+        DOWNLOAD_TOKEN: ${{ inputs.github-token || github.token }}
+
+    - name: Configure SSH
+      id: ssh
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/ssh"
+        chmod 700 "$RUNNER_TEMP/ssh"
+
+        if [ -n "${SSH_PRIVATE_KEY}" ]; then
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ssh/deploy_key"
+          chmod 600 "$RUNNER_TEMP/ssh/deploy_key"
+          echo "SSH_PRIVATE_KEY_FILE=$RUNNER_TEMP/ssh/deploy_key" >> "$GITHUB_ENV"
+        fi
+
+        if [ -n "${SSH_KNOWN_HOSTS}" ]; then
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ssh/known_hosts"
+          echo "SSH_KNOWN_HOSTS_FILE=$RUNNER_TEMP/ssh/known_hosts" >> "$GITHUB_ENV"
+        fi
+      env:
+        SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
+        SSH_KNOWN_HOSTS: ${{ inputs.ssh-known-hosts }}
+
+    - name: Build archive
+      if: ${{ inputs.mode == 'report' || inputs.mode == 'apply' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        "$SSH_ARCHIVE_DEPLOY_BIN" build \
+          --config "${CONFIG}" \
+          --output "${ARCHIVE}"
+      env:
+        CONFIG: ${{ inputs.config }}
+        ARCHIVE: ${{ inputs.archive }}
+        PEX_ROOT: ${{ runner.temp }}/ssh-archive-deploy-pex
+        SSH_ARCHIVE_DEPLOY_BIN: ${{ steps.install.outputs.binary }}
+
+    - name: Run mode
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        case "${MODE}" in
+          report)
+            "$SSH_ARCHIVE_DEPLOY_BIN" report \
+              --config "${CONFIG}" \
+              --archive "${ARCHIVE}" \
+              --output-dir "${REPORT_DIR}"
+            ;;
+          apply)
+            "$SSH_ARCHIVE_DEPLOY_BIN" apply \
+              --config "${CONFIG}" \
+              --archive "${ARCHIVE}" \
+              --result-json "${RESULT_JSON}"
+            ;;
+          rollback)
+            "$SSH_ARCHIVE_DEPLOY_BIN" rollback \
+              --config "${CONFIG}" \
+              --release "${ROLLBACK_RELEASE}" \
+              --result-json "${RESULT_JSON}"
+            ;;
+          *)
+            echo "Unsupported mode: ${MODE}" >&2
+            exit 2
+            ;;
+        esac
+      env:
+        MODE: ${{ inputs.mode }}
+        CONFIG: ${{ inputs.config }}
+        ARCHIVE: ${{ inputs.archive }}
+        REPORT_DIR: ${{ inputs.report-dir }}
+        ROLLBACK_RELEASE: ${{ inputs.rollback-release }}
+        RESULT_JSON: ${{ runner.temp }}/ssh-archive-deploy-result.json
+        SSH_HOST: ${{ inputs.ssh-host }}
+        SSH_USER: ${{ inputs.ssh-user }}
+        SSH_PORT: ${{ inputs.ssh-port }}
+        PEX_ROOT: ${{ runner.temp }}/ssh-archive-deploy-pex
+        SSH_ARCHIVE_DEPLOY_BIN: ${{ steps.install.outputs.binary }}
+
+    - name: Write report summary
+      if: ${{ inputs.mode == 'report' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          "$SSH_ARCHIVE_DEPLOY_BIN" summarize-report \
+            --report "${REPORT_DIR}/report.json" \
+            --format github >> "$GITHUB_STEP_SUMMARY"
+        fi
+      env:
+        REPORT_DIR: ${{ inputs.report-dir }}
+        PEX_ROOT: ${{ runner.temp }}/ssh-archive-deploy-pex
+        SSH_ARCHIVE_DEPLOY_BIN: ${{ steps.install.outputs.binary }}
+
+    - name: Export outputs
+      id: export
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -f "${ARCHIVE}.manifest.json" ]; then
+          release_id="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["release_id"])' "${ARCHIVE}.manifest.json")"
+          echo "release-id=${release_id}" >> "$GITHUB_OUTPUT"
+          echo "manifest-path=${ARCHIVE}.manifest.json" >> "$GITHUB_OUTPUT"
+        fi
+        if [ -f "${RESULT_JSON}" ]; then
+          result_release_id="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("release_id", ""))' "${RESULT_JSON}")"
+          transaction_id="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("transaction_id", ""))' "${RESULT_JSON}")"
+          checkpoint_path="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("checkpoint_path", ""))' "${RESULT_JSON}")"
+          rollback_command="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("rollback_command", ""))' "${RESULT_JSON}")"
+          if [ ! -f "${ARCHIVE}.manifest.json" ]; then
+            echo "release-id=${result_release_id}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "transaction-id=${transaction_id}" >> "$GITHUB_OUTPUT"
+          echo "checkpoint-path=${checkpoint_path}" >> "$GITHUB_OUTPUT"
+          echo "rollback-command=${rollback_command}" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        ARCHIVE: ${{ inputs.archive }}
+        RESULT_JSON: ${{ runner.temp }}/ssh-archive-deploy-result.json
