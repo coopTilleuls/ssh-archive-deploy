@@ -89,12 +89,9 @@ contain the expected host key. It is required for `apply` and `rollback`; those
 modes fail before connecting if no known-hosts file is configured. `report`
 may still run with the CLI fallback host-key policy for read-only inspection.
 
-If the action repository is private and the consumer workflow token cannot read
-the release assets, pass a token with read access to the action repository:
-
-```yaml
-github-token: ${{ secrets.SSH_ARCHIVE_DEPLOY_GITHUB_TOKEN }}
-```
+The action uses the job `GITHUB_TOKEN` to download its published PEX release
+asset and verify the artifact attestation. Keep `permissions: contents: read`
+in the consumer workflow; no dedicated release-download secret is required.
 
 ## Report Review
 

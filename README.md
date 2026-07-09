@@ -73,14 +73,9 @@ without changing consumer workflows. Pin an exact release such as `@v0.2.1`
 when a project needs fully immutable action resolution.
 
 The release workflow publishes immutable tags such as `v0.2.1` and moves the
-matching major tag, such as `v0`, to the same tested commit.
-
-For private action repositories, pass `github-token` if the consumer workflow
-token cannot read the action repository release assets.
-
-```yaml
-github-token: ${{ secrets.SSH_ARCHIVE_DEPLOY_GITHUB_TOKEN }}
-```
+matching major tag, such as `v0`, to the same tested commit. The action uses the
+consumer workflow `GITHUB_TOKEN` to download the published PEX and verify its
+attestation; no dedicated token input is required.
 
 ## Deploy Configuration
 

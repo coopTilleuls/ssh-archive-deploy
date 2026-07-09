@@ -38,10 +38,6 @@ inputs:
   ssh-known-hosts:
     description: Known hosts content. Required for apply and rollback.
     required: false
-  github-token:
-    description: Token used to download release assets for private action repositories.
-    required: false
-
 outputs:
   release-id:
     description: Release id from the generated manifest.
@@ -91,7 +87,7 @@ runs:
 
         mkdir -p "$install_dir"
 
-        GH_TOKEN="${DOWNLOAD_TOKEN}" gh release download "${tag}" \
+        gh release download "${tag}" \
           --repo "${ACTION_REPOSITORY}" \
           --pattern "${asset}" \
           --pattern "${asset}.sha256" \
@@ -104,17 +100,17 @@ runs:
         )
 
         tag_ref="repos/${ACTION_REPOSITORY}/git/ref/tags/${tag}"
-        expected_source_digest="$(GH_TOKEN="${DOWNLOAD_TOKEN}" gh api "$tag_ref" --jq .object.sha)"
-        tag_object_type="$(GH_TOKEN="${DOWNLOAD_TOKEN}" gh api "$tag_ref" --jq .object.type)"
+        expected_source_digest="$(gh api "$tag_ref" --jq .object.sha)"
+        tag_object_type="$(gh api "$tag_ref" --jq .object.type)"
         if [ "$tag_object_type" = "tag" ]; then
           expected_source_digest="$(
-            GH_TOKEN="${DOWNLOAD_TOKEN}" gh api \
+            gh api \
               "repos/${ACTION_REPOSITORY}/git/tags/${expected_source_digest}" \
               --jq .object.sha
           )"
         fi
 
-        GH_TOKEN="${DOWNLOAD_TOKEN}" gh attestation verify "$install_dir/$asset" \
+        gh attestation verify "$install_dir/$asset" \
           --repo "${ACTION_REPOSITORY}" \
           --signer-workflow "${ACTION_REPOSITORY}/.github/workflows/release.yml" \
           --source-digest "${expected_source_digest}" \
@@ -125,7 +121,7 @@ runs:
         echo "binary=$install_dir/$asset" >> "$GITHUB_OUTPUT"
       env:
         ACTION_REPOSITORY: ${{ github.action_repository }}
-        DOWNLOAD_TOKEN: ${{ inputs.github-token || github.token }}
+        GH_TOKEN: ${{ github.token }}
 
     - name: Configure SSH
       id: ssh
