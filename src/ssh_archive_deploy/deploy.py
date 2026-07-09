@@ -734,20 +734,28 @@ def validate_artifact_extract_body(plan: ExecutionPlan) -> str:
     return "\n".join(validate_artifact_file_line(operation) for operation in operations)
 
 
+def shell_error_line(message: str) -> str:
+    return f"printf '%s\\n' {quote(message)} >&2"
+
+
+def path_error_line(message: str, path: str) -> str:
+    return shell_error_line(f"{message}: {path}")
+
+
 def validate_artifact_file_line(operation: ExecutionOperation) -> str:
     source = f'"$extract"/{quote(operation.path)}'
     return " ".join(
         [
             f"if [ -L {source} ] || [ ! -f {source} ]; then",
-            f'echo "artifact file missing or unsafe: {operation.path}" >&2;',
+            f"{path_error_line('artifact file missing or unsafe', operation.path)};",
             "exit 1;",
             "fi;",
             f'if [ "$(wc -c < {source} | tr -d " ")" != {quote(str(operation.size))} ]; then',
-            f'echo "artifact file size mismatch: {operation.path}" >&2;',
+            f"{path_error_line('artifact file size mismatch', operation.path)};",
             "exit 1;",
             "fi;",
             f'if [ "$(sha256sum {source} | cut -d" " -f1)" != {quote(operation.sha256)} ]; then',
-            f'echo "artifact file checksum mismatch: {operation.path}" >&2;',
+            f"{path_error_line('artifact file checksum mismatch', operation.path)};",
             "exit 1;",
             "fi",
         ],
@@ -757,20 +765,18 @@ def validate_artifact_file_line(operation: ExecutionOperation) -> str:
 def apply_preflight_line(operation: ExecutionOperation) -> str:
     target = f'"$root"/{quote(operation.path)}'
     if operation.op == "create":
-        return (
-            f"if [ -e {target} ] || [ -L {target} ]; then "
-            f'echo "remote path appeared before apply: {operation.path}" >&2; exit 1; fi'
-        )
+        error = path_error_line("remote path appeared before apply", operation.path)
+        return f"if [ -e {target} ] || [ -L {target} ]; then {error}; exit 1; fi"
     if operation.op == "replace":
         expected = quote(require_remote_sha_before(operation))
         return " ".join(
             [
                 f"if [ -L {target} ] || [ ! -f {target} ]; then",
-                f'echo "remote path is no longer a regular file: {operation.path}" >&2;',
+                f"{path_error_line('remote path is no longer a regular file', operation.path)};",
                 "exit 1;",
                 "fi;",
                 f'if [ "$(sha256sum {target} | cut -d" " -f1)" != {expected} ]; then',
-                f'echo "remote file changed before apply: {operation.path}" >&2;',
+                f"{path_error_line('remote file changed before apply', operation.path)};",
                 "exit 1;",
                 "fi",
             ],
@@ -791,7 +797,7 @@ def apply_operation_line(operation: ExecutionOperation) -> str:
             f"cp -p {source} {target};",
             safe_parent_line(operation.path),
             f"if [ -L {target} ] || [ ! -f {target} ]; then",
-            f'echo "remote path is no longer a regular file: {operation.path}" >&2;',
+            f"{path_error_line('remote path is no longer a regular file', operation.path)};",
             "exit 1;",
             "fi;",
             f'test "$(sha256sum {target} | cut -d" " -f1)" = {expected}',
@@ -812,10 +818,10 @@ def recovery_apply_operation_line(operation: ExecutionOperation) -> str:
                 f"cp -p {source} {target};",
                 safe_parent_line(operation.path),
                 f"elif [ -L {target} ] || [ ! -f {target} ]; then",
-                f'echo "remote path is not recoverable: {operation.path}" >&2;',
+                f"{path_error_line('remote path is not recoverable', operation.path)};",
                 "exit 1;",
                 f'elif [ "$(sha256sum {target} | cut -d" " -f1)" != {artifact_sha} ]; then',
-                f'echo "remote path is not recoverable: {operation.path}" >&2;',
+                f"{path_error_line('remote path is not recoverable', operation.path)};",
                 "exit 1;",
                 "fi;",
                 f'test "$(sha256sum {target} | cut -d" " -f1)" = {artifact_sha}',
@@ -826,7 +832,7 @@ def recovery_apply_operation_line(operation: ExecutionOperation) -> str:
         return "\n".join(
             [
                 f"if [ -L {target} ] || [ ! -f {target} ]; then",
-                f'echo "remote path is not recoverable: {operation.path}" >&2;',
+                f"{path_error_line('remote path is not recoverable', operation.path)};",
                 "exit 1;",
                 "fi;",
                 f'current_sha="$(sha256sum {target} | cut -d" " -f1)";',
@@ -838,7 +844,7 @@ def recovery_apply_operation_line(operation: ExecutionOperation) -> str:
                 f'elif [ "$current_sha" = {artifact_sha} ]; then',
                 ":;",
                 "else",
-                f'echo "remote path is not recoverable: {operation.path}" >&2;',
+                f"{path_error_line('remote path is not recoverable', operation.path)};",
                 "exit 1;",
                 "fi;",
                 f'test "$(sha256sum {target} | cut -d" " -f1)" = {artifact_sha}',
@@ -857,12 +863,12 @@ def apply_recovery_state_line(operation: ExecutionOperation) -> str:
                 f"if [ ! -e {target} ] && [ ! -L {target} ]; then",
                 "before=$((before + 1));",
                 f"elif [ -L {target} ] || [ ! -f {target} ]; then",
-                f'echo "remote path is not recoverable: {operation.path}" >&2;',
+                f"{path_error_line('remote path is not recoverable', operation.path)};",
                 "exit 1;",
                 f'elif [ "$(sha256sum {target} | cut -d" " -f1)" = {artifact_sha} ]; then',
                 "deployed=$((deployed + 1));",
                 "else",
-                f'echo "remote path is not recoverable: {operation.path}" >&2;',
+                f"{path_error_line('remote path is not recoverable', operation.path)};",
                 "exit 1;",
                 "fi",
             ],
@@ -873,7 +879,7 @@ def apply_recovery_state_line(operation: ExecutionOperation) -> str:
             [
                 "total=$((total + 1));",
                 f"if [ -L {target} ] || [ ! -f {target} ]; then",
-                f'echo "remote path is not recoverable: {operation.path}" >&2;',
+                f"{path_error_line('remote path is not recoverable', operation.path)};",
                 "exit 1;",
                 "fi;",
                 f'current_sha="$(sha256sum {target} | cut -d" " -f1)";',
@@ -882,7 +888,7 @@ def apply_recovery_state_line(operation: ExecutionOperation) -> str:
                 f'elif [ "$current_sha" = {artifact_sha} ]; then',
                 "deployed=$((deployed + 1));",
                 "else",
-                f'echo "remote path is not recoverable: {operation.path}" >&2;',
+                f"{path_error_line('remote path is not recoverable', operation.path)};",
                 "exit 1;",
                 "fi",
             ],
@@ -954,17 +960,17 @@ def validate_checkpoint_file_line(operation: ExecutionOperation) -> str:
     return " ".join(
         [
             f"if [ -L {source} ] || [ ! -f {source} ]; then",
-            f'echo "before checkpoint file missing or unsafe: {operation.path}" >&2;',
+            f"{path_error_line('before checkpoint file missing or unsafe', operation.path)};",
             "exit 1;",
             "fi;",
             f'if [ "$(wc -c < {source} | tr -d " ")" != '
             f"{quote(str(require_remote_size_before(operation)))} ]; then",
-            f'echo "before checkpoint file size mismatch: {operation.path}" >&2;',
+            f"{path_error_line('before checkpoint file size mismatch', operation.path)};",
             "exit 1;",
             "fi;",
             f'if [ "$(sha256sum {source} | cut -d" " -f1)" != '
             f"{quote(require_remote_sha_before(operation))} ]; then",
-            f'echo "before checkpoint file checksum mismatch: {operation.path}" >&2;',
+            f"{path_error_line('before checkpoint file checksum mismatch', operation.path)};",
             "exit 1;",
             "fi",
         ],
@@ -1005,11 +1011,11 @@ def rollback_preflight_line(operation: ExecutionOperation) -> str:
     return " ".join(
         [
             f"if [ -L {target} ] || [ ! -f {target} ]; then",
-            f'echo "{message}: {operation.path}" >&2;',
+            f"{path_error_line(message, operation.path)};",
             "exit 1;",
             "fi;",
             f'if [ "$(sha256sum {target} | cut -d" " -f1)" != {expected} ]; then',
-            f'echo "{message}: {operation.path}" >&2;',
+            f"{path_error_line(message, operation.path)};",
             "exit 1;",
             "fi",
         ],
@@ -1052,7 +1058,7 @@ def restore_replaced_file_line(operation: ExecutionOperation) -> str:
             f"rm -f {target};",
             f"cp -p {source} {target};",
             f"if [ -L {target} ] || [ ! -f {target} ]; then",
-            f'echo "replaced file changed before rollback: {operation.path}" >&2;',
+            f"{path_error_line('replaced file changed before rollback', operation.path)};",
             "exit 1;",
             "fi;",
             f'test "$(sha256sum {target} | cut -d" " -f1)" = '
@@ -1075,11 +1081,11 @@ def safe_parent_line(path: str) -> str:
             '  IFS="$old_ifs";',
             '  current="$current/$part";',
             '  if [ -L "$current" ]; then',
-            f'    echo "remote parent is a symlink: {path}" >&2;',
+            f"    {path_error_line('remote parent is a symlink', path)};",
             "    exit 1;",
             "  fi;",
             '  if [ -e "$current" ] && [ ! -d "$current" ]; then',
-            f'    echo "remote parent is not a directory: {path}" >&2;',
+            f"    {path_error_line('remote parent is not a directory', path)};",
             "    exit 1;",
             "  fi;",
             "  IFS=/;",

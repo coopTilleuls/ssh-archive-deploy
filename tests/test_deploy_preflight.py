@@ -108,6 +108,87 @@ def test_rollback_preflight_rejects_created_symlink(tmp_path: Path) -> None:
     assert "created file changed before rollback: new.php" in result.stderr
 
 
+def test_apply_preflight_quotes_untrusted_parent_error_paths(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    marker = tmp_path / "apply_preflight_pwned"
+    root.mkdir()
+    (root / "index.php").write_text("file parent\n", encoding="utf-8")
+    malicious_path = f"index.php/x$(touch {marker.name})"
+    plan = plan_with(
+        ExecutionOperation("create", malicious_path, "root", 4, sha256="new-sha"),
+    )
+
+    result = run_script(apply_preflight_script(config_for(root), plan), cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert f"remote parent is not a directory: {malicious_path}" in result.stderr
+    assert not marker.exists()
+
+
+def test_apply_preflight_quotes_untrusted_operation_error_paths(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    marker = tmp_path / "apply_operation_pwned"
+    root.mkdir()
+    malicious_path = f"created$(touch {marker.name}).php"
+    (root / malicious_path).write_text("manual\n", encoding="utf-8")
+    plan = plan_with(
+        ExecutionOperation("create", malicious_path, "root", 4, sha256="new-sha"),
+    )
+
+    result = run_script(apply_preflight_script(config_for(root), plan), cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert f"remote path appeared before apply: {malicious_path}" in result.stderr
+    assert not marker.exists()
+
+
+def test_recovery_state_quotes_untrusted_operation_error_paths(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    transaction_dir = tmp_path / "deploy/transactions/tx-1"
+    marker = tmp_path / "recovery_state_pwned"
+    root.mkdir()
+    transaction_dir.mkdir(parents=True)
+    (transaction_dir / "apply-plan.json").write_text("{}\n", encoding="utf-8")
+    malicious_path = f"created$(touch {marker.name}).php"
+    (root / malicious_path).mkdir()
+    plan = plan_with(
+        ExecutionOperation("create", malicious_path, "root", 4, sha256="new-sha"),
+    )
+
+    result = run_script(
+        apply_recovery_state_script(config_for(root), str(transaction_dir), plan),
+        cwd=tmp_path,
+    )
+
+    assert result.returncode != 0
+    assert f"remote path is not recoverable: {malicious_path}" in result.stderr
+    assert not marker.exists()
+
+
+def test_rollback_preflight_quotes_untrusted_operation_error_paths(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    marker = tmp_path / "rollback_preflight_pwned"
+    root.mkdir()
+    malicious_path = f"created$(touch {marker.name}).php"
+    target = root / malicious_path
+    target.write_text("artifact\n", encoding="utf-8")
+    plan = plan_with(
+        ExecutionOperation(
+            "create",
+            malicious_path,
+            "root",
+            target.stat().st_size,
+            sha256="wrong-sha",
+        ),
+    )
+
+    result = run_script(rollback_preflight_script(config_for(root), plan), cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert f"created file changed before rollback: {malicious_path}" in result.stderr
+    assert not marker.exists()
+
+
 def test_recovery_apply_resumes_mixed_before_and_deployed_state(tmp_path: Path) -> None:
     root = tmp_path / "remote"
     transaction_dir = tmp_path / "deploy/transactions/tx-1"
@@ -330,12 +411,13 @@ def plan_with(*operations: ExecutionOperation) -> ExecutionPlan:
     )
 
 
-def run_script(script: str) -> subprocess.CompletedProcess[str]:
+def run_script(script: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["sh", "-s"],
         input=script,
         text=True,
         capture_output=True,
+        cwd=cwd,
         check=False,
     )
 
