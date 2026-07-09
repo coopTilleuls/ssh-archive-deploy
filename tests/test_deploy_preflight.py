@@ -350,6 +350,157 @@ def test_apply_script_rejects_raced_destination_symlink(tmp_path: Path) -> None:
     assert outside.read_text(encoding="utf-8") == "old outside\n"
 
 
+def test_apply_script_does_not_follow_raced_destination_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    transaction_dir = tmp_path / "deploy/transactions/tx-1"
+    artifact = tmp_path / "artifact"
+    outside = tmp_path / "outside.txt"
+    root.mkdir()
+    (root / "dir").mkdir()
+    transaction_dir.mkdir(parents=True)
+    artifact.mkdir()
+    (artifact / "dir").mkdir()
+    outside.write_text("old outside\n", encoding="utf-8")
+    current = root / "dir/target.txt"
+    current.write_text("old\n", encoding="utf-8")
+    (artifact / "dir/target.txt").write_text("new\n", encoding="utf-8")
+    write_tar(transaction_dir / "artifact.tar.gz", artifact)
+    plan = plan_with(
+        ExecutionOperation(
+            "replace",
+            "dir/target.txt",
+            "root",
+            4,
+            sha256=sha256_file(artifact / "dir/target.txt"),
+            remote_sha256_before=sha256_file(current),
+            remote_size_before=current.stat().st_size,
+        ),
+    )
+    script = apply_script(config_for(root), str(transaction_dir), plan).replace(
+        'extract_confined_file replace "$extract" dir/target.txt;',
+        (
+            'rm -f "$root"/dir/target.txt;\n'
+            'ln -s ../../outside.txt "$root"/dir/target.txt;\n'
+            'extract_confined_file replace "$extract" dir/target.txt;'
+        ),
+        1,
+    )
+
+    result = run_script(script)
+
+    assert result.returncode == 0
+    assert outside.read_text(encoding="utf-8") == "old outside\n"
+    assert not current.is_symlink()
+    assert current.read_text(encoding="utf-8") == "new\n"
+
+
+def test_apply_script_rejects_raced_parent_symlink_without_writing_outside(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "remote"
+    transaction_dir = tmp_path / "deploy/transactions/tx-1"
+    artifact = tmp_path / "artifact"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    (root / "dir").mkdir()
+    transaction_dir.mkdir(parents=True)
+    artifact.mkdir()
+    (artifact / "dir").mkdir()
+    outside.mkdir()
+    current = root / "dir/target.txt"
+    current.write_text("old\n", encoding="utf-8")
+    (artifact / "dir/target.txt").write_text("new\n", encoding="utf-8")
+    write_tar(transaction_dir / "artifact.tar.gz", artifact)
+    plan = plan_with(
+        ExecutionOperation(
+            "replace",
+            "dir/target.txt",
+            "root",
+            4,
+            sha256=sha256_file(artifact / "dir/target.txt"),
+            remote_sha256_before=sha256_file(current),
+            remote_size_before=current.stat().st_size,
+        ),
+    )
+    script = apply_script(config_for(root), str(transaction_dir), plan).replace(
+        'extract_confined_file replace "$extract" dir/target.txt;',
+        (
+            'rm -rf "$root"/dir;\n'
+            'ln -s ../outside "$root"/dir;\n'
+            'extract_confined_file replace "$extract" dir/target.txt;'
+        ),
+        1,
+    )
+
+    result = run_script(script)
+
+    assert result.returncode != 0
+    assert not (outside / "target.txt").exists()
+
+
+def test_apply_create_rejects_raced_destination_symlink_without_writing_outside(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "remote"
+    transaction_dir = tmp_path / "deploy/transactions/tx-1"
+    artifact = tmp_path / "artifact"
+    outside = tmp_path / "outside.txt"
+    root.mkdir()
+    transaction_dir.mkdir(parents=True)
+    artifact.mkdir()
+    outside.write_text("old outside\n", encoding="utf-8")
+    (artifact / "created.txt").write_text("new\n", encoding="utf-8")
+    write_tar(transaction_dir / "artifact.tar.gz", artifact)
+    plan = plan_with(
+        ExecutionOperation(
+            "create",
+            "created.txt",
+            "root",
+            4,
+            sha256=sha256_file(artifact / "created.txt"),
+        ),
+    )
+    script = apply_script(config_for(root), str(transaction_dir), plan).replace(
+        'extract_confined_file create "$extract" created.txt;',
+        (
+            'ln -s ../outside.txt "$root"/created.txt;\n'
+            'extract_confined_file create "$extract" created.txt;'
+        ),
+        1,
+    )
+
+    result = run_script(script)
+
+    assert result.returncode != 0
+    assert outside.read_text(encoding="utf-8") == "old outside\n"
+    assert (root / "created.txt").is_symlink()
+
+
+def test_apply_create_handles_leading_dash_paths(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    transaction_dir = tmp_path / "deploy/transactions/tx-1"
+    artifact = tmp_path / "artifact"
+    root.mkdir()
+    transaction_dir.mkdir(parents=True)
+    artifact.mkdir()
+    (artifact / "-created.txt").write_text("new\n", encoding="utf-8")
+    write_tar(transaction_dir / "artifact.tar.gz", artifact)
+    plan = plan_with(
+        ExecutionOperation(
+            "create",
+            "-created.txt",
+            "root",
+            4,
+            sha256=sha256_file(artifact / "-created.txt"),
+        ),
+    )
+
+    result = run_script(apply_script(config_for(root), str(transaction_dir), plan))
+
+    assert result.returncode == 0
+    assert (root / "-created.txt").read_text(encoding="utf-8") == "new\n"
+
+
 def test_rollback_script_does_not_extract_through_symlink_parent(tmp_path: Path) -> None:
     root = tmp_path / "remote"
     target_dir = tmp_path / "deploy/transactions/tx-1"
@@ -386,6 +537,86 @@ def test_rollback_script_does_not_extract_through_symlink_parent(tmp_path: Path)
 
     assert result.returncode != 0
     assert not (outside / "victim.txt").exists()
+
+
+def test_rollback_delete_rejects_raced_parent_symlink_without_deleting_outside(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "remote"
+    target_dir = tmp_path / "deploy/transactions/tx-1"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    (root / "uploads").mkdir()
+    target_dir.mkdir(parents=True)
+    outside.mkdir()
+    before = tmp_path / "before-empty"
+    before.mkdir()
+    write_tar(target_dir / "before.tar.gz", before)
+    victim = root / "uploads/victim.txt"
+    victim.write_text("new\n", encoding="utf-8")
+    outside_victim = outside / "victim.txt"
+    outside_victim.write_text("outside\n", encoding="utf-8")
+    plan = plan_with(
+        ExecutionOperation(
+            "create",
+            "uploads/victim.txt",
+            "root",
+            victim.stat().st_size,
+            sha256=sha256_file(victim),
+        ),
+    )
+    script = rollback_script(config_for(root), str(target_dir), plan).replace(
+        "delete_confined_file uploads/victim.txt;",
+        (
+            'rm -rf "$root"/uploads;\n'
+            'ln -s ../outside "$root"/uploads;\n'
+            "delete_confined_file uploads/victim.txt;"
+        ),
+        1,
+    )
+
+    result = run_script(script)
+
+    assert result.returncode != 0
+    assert outside_victim.read_text(encoding="utf-8") == "outside\n"
+
+
+def test_rollback_delete_does_not_follow_parent_symlink_replaced_after_find(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "remote"
+    target_dir = tmp_path / "deploy/transactions/tx-1"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    (root / "uploads").mkdir()
+    target_dir.mkdir(parents=True)
+    outside.mkdir()
+    before = tmp_path / "before-empty-late-race"
+    before.mkdir()
+    write_tar(target_dir / "before.tar.gz", before)
+    victim = root / "uploads/victim.txt"
+    victim.write_text("new\n", encoding="utf-8")
+    outside_victim = outside / "victim.txt"
+    outside_victim.write_text("outside\n", encoding="utf-8")
+    plan = plan_with(
+        ExecutionOperation(
+            "create",
+            "uploads/victim.txt",
+            "root",
+            victim.stat().st_size,
+            sha256=sha256_file(victim),
+        ),
+    )
+    script = rollback_script(config_for(root), str(target_dir), plan).replace(
+        'rm -f -- "$item" || exit 1',
+        ('rm -rf "$root"/uploads\nln -s ../outside "$root"/uploads\nrm -f -- "$item" || exit 1'),
+        1,
+    )
+
+    result = run_script(script)
+
+    assert result.returncode == 0
+    assert outside_victim.read_text(encoding="utf-8") == "outside\n"
 
 
 def config_for(root: Path) -> DeployConfig:

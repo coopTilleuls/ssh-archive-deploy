@@ -200,6 +200,9 @@ SSH commands also read settings from these environment variables:
 `SSH_KNOWN_HOSTS_FILE` is required for `apply` and `rollback`. Without it,
 mutating commands fail before opening an SSH session.
 
+Remote `apply` and `rollback` require GNU tar with `--keep-old-files` support.
+No Python runtime is required on the remote server.
+
 ## Security Model
 
 The tool is designed for SSH-only hosting where the repository is trusted but

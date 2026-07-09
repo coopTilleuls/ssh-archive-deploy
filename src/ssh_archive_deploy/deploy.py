@@ -413,7 +413,6 @@ def ensure_remote_state(config: DeployConfig, ssh: SshConfig) -> None:
             "command -v rm >/dev/null || exit 1",
             "command -v cat >/dev/null || exit 1",
             "command -v cut >/dev/null || exit 1",
-            "command -v cp >/dev/null || exit 1",
             "command -v dirname >/dev/null || exit 1",
             "command -v rmdir >/dev/null || exit 1",
             "command -v basename >/dev/null || exit 1",
@@ -423,6 +422,8 @@ def ensure_remote_state(config: DeployConfig, ssh: SshConfig) -> None:
             "command -v wc >/dev/null || exit 1",
             "command -v tr >/dev/null || exit 1",
             'command -v sha256sum >/dev/null || { echo "sha256sum is required" >&2; exit 1; }',
+            'tar --help 2>/dev/null | grep -q -- "--keep-old-files" '
+            '|| { echo "GNU tar with --keep-old-files is required" >&2; exit 1; }',
         ],
     )
     run_ssh_script(ssh, script)
@@ -649,6 +650,7 @@ def apply_script(config: DeployConfig, transaction_dir: str, plan: ExecutionPlan
             "set -eu",
             f"root={quote(config.remote.root)}",
             f"transaction_dir={quote(transaction_dir)}",
+            confined_mutation_functions(),
             'extract="$transaction_dir/extract"',
             'rm -rf "$extract"',
             'mkdir -p "$extract"',
@@ -669,6 +671,7 @@ def recovery_apply_script(config: DeployConfig, transaction_dir: str, plan: Exec
             "set -eu",
             f"root={quote(config.remote.root)}",
             f"transaction_dir={quote(transaction_dir)}",
+            confined_mutation_functions(),
             'extract="$transaction_dir/extract"',
             'rm -rf "$extract"',
             'mkdir -p "$extract"',
@@ -742,6 +745,64 @@ def path_error_line(message: str, path: str) -> str:
     return shell_error_line(f"{message}: {path}")
 
 
+def confined_mutation_functions() -> str:
+    return r"""extract_confined_file() {
+  mode="$1"
+  source_root="$2"
+  relpath="$3"
+  tmp_archive="$(mktemp)"
+  tar -C "$source_root" -cf "$tmp_archive" -- "$relpath" || {
+    status="$?"
+    rm -f "$tmp_archive"
+    return "$status"
+  }
+  if [ "$mode" = "create" ]; then
+    tar -C "$root" --keep-old-files -xf "$tmp_archive" || {
+      status="$?"
+      rm -f "$tmp_archive"
+      return "$status"
+    }
+  elif [ "$mode" = "replace" ]; then
+    tar -C "$root" -xf "$tmp_archive" || {
+      status="$?"
+      rm -f "$tmp_archive"
+      return "$status"
+    }
+  else
+    rm -f "$tmp_archive"
+    printf '%s\n' "unsupported confined extract mode: $mode" >&2
+    exit 1
+  fi
+  rm -f "$tmp_archive"
+}
+
+delete_confined_file() {
+  relpath="$1"
+  target="./$relpath"
+  marker="$(mktemp)"
+  rm -f "$marker"
+  find_status=0
+  (
+    cd "$root"
+    find . -depth -type f -path "$target" -execdir sh -c '
+      marker="$1"
+      shift
+      for item do
+        rm -f -- "$item" || exit 1
+        : > "$marker"
+      done
+      exit 0
+    ' sh "$marker" {} +
+  ) || find_status="$?"
+  if [ "$find_status" != "0" ] || [ ! -f "$marker" ]; then
+    rm -f "$marker"
+    printf '%s\n' "created file changed before rollback: $relpath" >&2
+    exit 1
+  fi
+  rm -f "$marker"
+}"""
+
+
 def validate_artifact_file_line(operation: ExecutionOperation) -> str:
     source = f'"$extract"/{quote(operation.path)}'
     return " ".join(
@@ -785,16 +846,13 @@ def apply_preflight_line(operation: ExecutionOperation) -> str:
 
 
 def apply_operation_line(operation: ExecutionOperation) -> str:
-    source = f'"$extract"/{quote(operation.path)}'
     target = f'"$root"/{quote(operation.path)}'
     expected = quote(operation.sha256)
     return "\n".join(
         [
-            f'mkdir -p "$(dirname {target})";',
             safe_parent_line(operation.path),
             apply_preflight_line(operation),
-            f"rm -f {target};",
-            f"cp -p {source} {target};",
+            f'extract_confined_file {quote(operation.op)} "$extract" {quote(operation.path)};',
             safe_parent_line(operation.path),
             f"if [ -L {target} ] || [ ! -f {target} ]; then",
             f"{path_error_line('remote path is no longer a regular file', operation.path)};",
@@ -806,16 +864,14 @@ def apply_operation_line(operation: ExecutionOperation) -> str:
 
 
 def recovery_apply_operation_line(operation: ExecutionOperation) -> str:
-    source = f'"$extract"/{quote(operation.path)}'
     target = f'"$root"/{quote(operation.path)}'
     artifact_sha = quote(operation.sha256)
     if operation.op == "create":
         return "\n".join(
             [
                 f"if [ ! -e {target} ] && [ ! -L {target} ]; then",
-                f'mkdir -p "$(dirname {target})";',
                 safe_parent_line(operation.path),
-                f"cp -p {source} {target};",
+                f'extract_confined_file create "$extract" {quote(operation.path)};',
                 safe_parent_line(operation.path),
                 f"elif [ -L {target} ] || [ ! -f {target} ]; then",
                 f"{path_error_line('remote path is not recoverable', operation.path)};",
@@ -838,8 +894,7 @@ def recovery_apply_operation_line(operation: ExecutionOperation) -> str:
                 f'current_sha="$(sha256sum {target} | cut -d" " -f1)";',
                 f'if [ "$current_sha" = {before_sha} ]; then',
                 safe_parent_line(operation.path),
-                f"rm -f {target};",
-                f"cp -p {source} {target};",
+                f'extract_confined_file replace "$extract" {quote(operation.path)};',
                 safe_parent_line(operation.path),
                 f'elif [ "$current_sha" = {artifact_sha} ]; then',
                 ":;",
@@ -905,6 +960,7 @@ def rollback_script(config: DeployConfig, target_dir: str, plan: ExecutionPlan) 
             "set -eu",
             f"root={quote(config.remote.root)}",
             f"target_dir={quote(target_dir)}",
+            confined_mutation_functions(),
             before_checkpoint_validation_body(plan),
             rollback_preflight_body(plan),
             *[restore_replaced_file_line(operation) for operation in replaced],
@@ -1038,25 +1094,22 @@ def validate_rollback_preconditions(plan: ExecutionPlan, current_root: Path) -> 
 
 
 def delete_created_file_line(operation: ExecutionOperation) -> str:
-    target = f'"$root"/{quote(operation.path)}'
     return "\n".join(
         [
             safe_parent_line(operation.path),
             rollback_preflight_line(operation),
-            f"rm -f {target};",
+            f"delete_confined_file {quote(operation.path)};",
         ],
     )
 
 
 def restore_replaced_file_line(operation: ExecutionOperation) -> str:
-    source = f'"$checkpoint_extract"/{quote(operation.path)}'
     target = f'"$root"/{quote(operation.path)}'
     return "\n".join(
         [
             safe_parent_line(operation.path),
             rollback_preflight_line(operation),
-            f"rm -f {target};",
-            f"cp -p {source} {target};",
+            f'extract_confined_file replace "$checkpoint_extract" {quote(operation.path)};',
             f"if [ -L {target} ] || [ ! -f {target} ]; then",
             f"{path_error_line('replaced file changed before rollback', operation.path)};",
             "exit 1;",

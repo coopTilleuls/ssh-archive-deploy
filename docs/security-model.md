@@ -18,6 +18,8 @@ accidental data loss.
 - `apply` and `rollback` take an exclusive lock under `remote.workdir` before
   mutating the remote document root.
 - Each apply creates a checkpoint before writing files under `remote.root`.
+- Mutating writes use GNU tar extraction primitives instead of direct `cp` to
+  avoid following raced destination symlinks outside `remote.root`.
 - Apply retries for failed transactions only proceed when each target file is
   either still in the pre-apply state or already matches the archive.
 - `rollback latest` refuses to restore over files that changed after apply.

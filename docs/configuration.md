@@ -52,6 +52,8 @@ Rules:
   are preserved.
 - `strategy.delete_unknown` must stay `false`; destructive replacement is not
   part of V1.
+- Mutating modes require GNU tar with `--keep-old-files` support on the remote
+  server. They do not require Python on the remote server.
 - Scalar values are parsed strictly. For example, `delete_unknown: "false"` and
   `retention: "3"` are rejected because they are strings, not booleans or
   integers.
@@ -63,9 +65,9 @@ Rules:
 ## Apply And Rollback Contract
 
 `apply` validates the archive, takes a remote lock, computes a fresh execution
-plan from the current server state, creates a checkpoint, then copies only
-`create` and `replace` files. `skip` files are left untouched and remote-only
-files are preserved.
+plan from the current server state, creates a checkpoint, then writes only
+`create` and `replace` files through confined tar extraction. `skip` files are
+left untouched and remote-only files are preserved.
 
 If a previous apply for the same `release_id` and archive is incomplete or
 failed, a retry attempts recovery instead of blindly blocking. Recovery is
