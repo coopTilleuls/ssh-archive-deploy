@@ -778,21 +778,32 @@ def confined_mutation_functions() -> str:
 
 delete_confined_file() {
   relpath="$1"
-  target="./$relpath"
   marker="$(mktemp)"
   rm -f "$marker"
   find_status=0
   (
     cd "$root"
-    find . -depth -type f -path "$target" -execdir sh -c '
+    root_physical="$(pwd -P)"
+    find . -depth -type f -execdir sh -c '
       marker="$1"
-      shift
+      root_physical="$2"
+      relpath="$3"
+      shift 3
+      current_dir="$(pwd -P)" || exit 1
+      case "$current_dir/" in
+        "$root_physical"/) parent_rel="" ;;
+        "$root_physical"/*/) parent_rel="${current_dir#"$root_physical"/}/" ;;
+        *) exit 1 ;;
+      esac
       for item do
-        rm -f -- "$item" || exit 1
-        : > "$marker"
+        candidate="$parent_rel${item#./}"
+        if [ "$candidate" = "$relpath" ]; then
+          rm -f -- "$item" || exit 1
+          : > "$marker"
+        fi
       done
       exit 0
-    ' sh "$marker" {} +
+    ' sh "$marker" "$root_physical" "$relpath" {} +
   ) || find_status="$?"
   if [ "$find_status" != "0" ] || [ ! -f "$marker" ]; then
     rm -f "$marker"

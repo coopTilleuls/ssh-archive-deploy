@@ -320,6 +320,95 @@ def test_rollback_validates_checkpoint_before_copy(tmp_path: Path) -> None:
     assert current.read_text(encoding="utf-8") == "artifact\n"
 
 
+def test_rollback_delete_treats_star_as_literal_path(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    target_dir = tmp_path / "deploy/transactions/tx-1"
+    before = tmp_path / "before-empty"
+    root.mkdir()
+    target_dir.mkdir(parents=True)
+    before.mkdir()
+    write_tar(target_dir / "before.tar.gz", before)
+    wildcard = root / "*"
+    wildcard.write_text("new\n", encoding="utf-8")
+    keep = root / "keep.txt"
+    keep.write_text("remote-only\n", encoding="utf-8")
+    plan = plan_with(
+        ExecutionOperation(
+            "create",
+            "*",
+            "root",
+            wildcard.stat().st_size,
+            sha256=sha256_file(wildcard),
+        ),
+    )
+
+    result = run_script(rollback_script(config_for(root), str(target_dir), plan))
+
+    assert result.returncode == 0
+    assert not wildcard.exists()
+    assert keep.read_text(encoding="utf-8") == "remote-only\n"
+
+
+def test_rollback_delete_treats_nested_globs_as_literal_path(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    target_dir = tmp_path / "deploy/transactions/tx-1"
+    before = tmp_path / "before-empty-nested"
+    root.mkdir()
+    (root / "dir").mkdir()
+    target_dir.mkdir(parents=True)
+    before.mkdir()
+    write_tar(target_dir / "before.tar.gz", before)
+    wildcard = root / "dir/file?.[txt]"
+    wildcard.write_text("new\n", encoding="utf-8")
+    keep = root / "dir/file1.t"
+    keep.write_text("remote-only\n", encoding="utf-8")
+    plan = plan_with(
+        ExecutionOperation(
+            "create",
+            "dir/file?.[txt]",
+            "root",
+            wildcard.stat().st_size,
+            sha256=sha256_file(wildcard),
+        ),
+    )
+
+    result = run_script(rollback_script(config_for(root), str(target_dir), plan))
+
+    assert result.returncode == 0
+    assert not wildcard.exists()
+    assert keep.read_text(encoding="utf-8") == "remote-only\n"
+
+
+def test_rollback_delete_handles_space_and_leading_dash_paths(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    target_dir = tmp_path / "deploy/transactions/tx-1"
+    before = tmp_path / "before-empty-special"
+    root.mkdir()
+    (root / "dir with space").mkdir()
+    target_dir.mkdir(parents=True)
+    before.mkdir()
+    write_tar(target_dir / "before.tar.gz", before)
+    created = root / "dir with space/-created.txt"
+    created.write_text("new\n", encoding="utf-8")
+    keep = root / "dir with space/keep.txt"
+    keep.write_text("remote-only\n", encoding="utf-8")
+    plan = plan_with(
+        ExecutionOperation(
+            "create",
+            "dir with space/-created.txt",
+            "root",
+            created.stat().st_size,
+            sha256=sha256_file(created),
+        ),
+    )
+
+    result = run_script(rollback_script(config_for(root), str(target_dir), plan))
+
+    assert result.returncode == 0
+    assert not created.exists()
+    assert keep.read_text(encoding="utf-8") == "remote-only\n"
+
+
 def test_apply_script_rejects_raced_destination_symlink(tmp_path: Path) -> None:
     root = tmp_path / "remote"
     transaction_dir = tmp_path / "deploy/transactions/tx-1"
