@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          project_version="$(python -c 'import pathlib,tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          project_version="$(uv version --short)"
 
           if [ "${EVENT_NAME}" = "push" ]; then
             tag="${REF_NAME}"
@@ -104,10 +104,9 @@ jobs:
             exit 0
           fi
 
-          release_json="$(gh release view "${TAG}" --json assets,isDraft,targetCommitish)"
-          is_draft="$(python -c 'import json,sys; print(str(json.load(sys.stdin)["isDraft"]).lower())' <<< "${release_json}")"
-          target_commitish="$(python -c 'import json,sys; print(json.load(sys.stdin)["targetCommitish"])' <<< "${release_json}")"
-          assets="$(python -c 'import json,sys; print("\n".join(sorted(asset["name"] for asset in json.load(sys.stdin)["assets"])))' <<< "${release_json}")"
+          is_draft="$(gh release view "${TAG}" --json isDraft --jq .isDraft)"
+          target_commitish="$(gh release view "${TAG}" --json targetCommitish --jq .targetCommitish)"
+          assets="$(gh release view "${TAG}" --json assets --jq '.assets | map(.name) | sort | join("\n")')"
 
           if [ "${is_draft}" = "true" ]; then
             echo "Draft release already exists and cannot be resumed safely: ${TAG}" >&2
@@ -163,10 +162,13 @@ jobs:
           release_published=0
           cleanup_draft_release() {
             if [ "${release_created}" = "1" ] && [ "${release_published}" = "0" ]; then
-              if [ "${tag_created}" = "1" ]; then
-                gh release delete "${TAG}" --yes --cleanup-tag || true
-              else
-                gh release delete "${TAG}" --yes || true
+              is_draft="$(gh release view "${TAG}" --json isDraft --jq .isDraft 2>/dev/null || echo false)"
+              if [ "${is_draft}" = "true" ]; then
+                if [ "${tag_created}" = "1" ]; then
+                  gh release delete "${TAG}" --yes --cleanup-tag || true
+                else
+                  gh release delete "${TAG}" --yes || true
+                fi
               fi
             elif [ "${tag_created}" = "1" ] && [ "${release_published}" = "0" ]; then
               git push --delete origin "${TAG}" || true
@@ -204,10 +206,32 @@ jobs:
 
       - name: Move major tag
         env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
           MAJOR_TAG: ${{ steps.version.outputs.major-tag }}
           TARGET: ${{ steps.version.outputs.target }}
+          VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+
+          major="${VERSION%%.*}"
+          latest_tag="$(
+            gh release list \
+              --exclude-drafts \
+              --exclude-pre-releases \
+              --limit 100 \
+              --json tagName \
+              --jq '.[].tagName' \
+            | grep -E "^v${major}\.[0-9]+\.[0-9]+$" \
+            | sort -V \
+            | tail -n 1
+          )"
+          if [ "${latest_tag}" != "${TAG}" ]; then
+            echo "Refusing to move ${MAJOR_TAG}: latest published major release is ${latest_tag}, current release is ${TAG}" >&2
+            exit 1
+          fi
+
+          git fetch origin --tags --force
           git tag --force "${MAJOR_TAG}" "${TARGET}"
           git push --force origin "refs/tags/${MAJOR_TAG}"
