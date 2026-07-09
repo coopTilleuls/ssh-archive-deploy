@@ -72,10 +72,11 @@ Use the moving major tag `@v0` to receive the latest compatible 0.x release
 without changing consumer workflows. Pin an exact release such as `@v0.2.1`
 when a project needs fully immutable action resolution.
 
-The release workflow publishes immutable tags such as `v0.2.1` and moves the
-matching major tag, such as `v0`, to the same tested commit. The action uses the
-consumer workflow `GITHUB_TOKEN` to download the published PEX and verify its
-attestation; no dedicated token input is required.
+The release workflow publishes immutable releases for exact tags such as
+`v0.2.1`, then moves the major tag, such as `v0`, to the same tested commit.
+The major tag is intentionally mutable and must not be associated with a GitHub
+Release. The action uses the consumer workflow `GITHUB_TOKEN` to download the
+published PEX and verify its attestation; no dedicated token input is required.
 
 ## Deploy Configuration
 
@@ -230,3 +231,24 @@ mise run test:e2e:pex
 
 `mise run fix` runs `hk fix --all --no-stage`, so automatic fixes are left for
 review instead of being staged.
+
+## Release
+
+Normal releases are created by pushing an exact SemVer tag from `main`:
+
+```bash
+uv version 0.2.4
+git add pyproject.toml uv.lock
+git commit -m "chore: release v0.2.4"
+git tag v0.2.4
+git push origin main v0.2.4
+```
+
+The release workflow refuses to publish unless the tag is `vX.Y.Z`, the
+`pyproject.toml` version matches `X.Y.Z`, and the tagged commit is included in
+`origin/main`. It builds and tests the PEX, creates the GitHub Release as a
+draft, uploads the assets, publishes the immutable release, then moves the
+mutable major tag such as `v0`.
+
+`workflow_dispatch` remains available as a fallback; it reads the version from
+`pyproject.toml` on `main` and creates the matching `vX.Y.Z` tag during release.

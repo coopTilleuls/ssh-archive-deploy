@@ -29,6 +29,9 @@ accidental data loss.
   and verifies a GitHub Artifact Attestation before execution. The attestation
   must be signed by this repository's release workflow and match the immutable
   version tag commit.
+- Exact release tags such as `v0.2.1` are protected by immutable releases. Major
+  tags such as `v0` are mutable compatibility pointers and are moved only after
+  a new exact release is published successfully.
 - The action uses the consumer job `GITHUB_TOKEN` for GitHub CLI release and
   attestation API calls. Consumer workflows should keep the token read-only.
 - E2E tests generate ephemeral SSH client keys and strict `known_hosts` files in

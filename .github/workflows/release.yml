@@ -2,6 +2,9 @@ name: Release
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
 
 permissions:
   contents: write
@@ -13,55 +16,122 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: main
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
           fetch-depth: 0
 
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
         with:
           install: true
           cache: true
 
       - name: Install Python dependencies
-        run: uv sync
+        run: uv sync --locked
 
-      - name: Read version
+      - name: Resolve and validate release version
         id: version
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          version="$(python -c 'import pathlib,tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+
+          project_version="$(python -c 'import pathlib,tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+
+          if [ "${EVENT_NAME}" = "push" ]; then
+            tag="${REF_NAME}"
+            if ! [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Release tags must match vX.Y.Z: ${tag}" >&2
+              exit 1
+            fi
+            version="${tag#v}"
+          else
+            version="${project_version}"
+            tag="v${version}"
+            if ! [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Project version must produce a vX.Y.Z tag: ${tag}" >&2
+              exit 1
+            fi
+          fi
+
+          if [ "${project_version}" != "${version}" ]; then
+            echo "pyproject.toml version (${project_version}) does not match release version (${version})" >&2
+            exit 1
+          fi
+
           major="${version%%.*}"
+          target="$(git rev-parse HEAD)"
+          git fetch origin main --tags --force
+
+          if [ "${EVENT_NAME}" = "push" ]; then
+            tag_target="$(git rev-parse "${tag}^{commit}")"
+            if [ "${tag_target}" != "${target}" ]; then
+              echo "Checked out commit (${target}) does not match tag ${tag} (${tag_target})" >&2
+              exit 1
+            fi
+          elif git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${tag}" >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "${target}" origin/main; then
+            echo "Release commit must be included in origin/main: ${target}" >&2
+            exit 1
+          fi
+
           {
             echo "version=${version}"
-            echo "tag=v${version}"
+            echo "tag=${tag}"
             echo "major-tag=v${major}"
+            echo "target=${target}"
+            echo "event-name=${EVENT_NAME}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Check release does not exist
+      - name: Check release state
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
+          TARGET: ${{ steps.version.outputs.target }}
         shell: bash
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag already exists: ${TAG}" >&2
-            exit 1
-          fi
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            echo "Release already exists: ${TAG}" >&2
-            exit 1
+
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
+          release_json="$(gh release view "${TAG}" --json assets,isDraft,targetCommitish)"
+          is_draft="$(python -c 'import json,sys; print(str(json.load(sys.stdin)["isDraft"]).lower())' <<< "${release_json}")"
+          target_commitish="$(python -c 'import json,sys; print(json.load(sys.stdin)["targetCommitish"])' <<< "${release_json}")"
+          assets="$(python -c 'import json,sys; print("\n".join(sorted(asset["name"] for asset in json.load(sys.stdin)["assets"])))' <<< "${release_json}")"
+
+          if [ "${is_draft}" = "true" ]; then
+            echo "Draft release already exists and cannot be resumed safely: ${TAG}" >&2
+            exit 1
+          fi
+          if [ "${target_commitish}" != "${TARGET}" ]; then
+            echo "Release ${TAG} points to ${target_commitish}, expected ${TARGET}" >&2
+            exit 1
+          fi
+          diff -u <(printf '%s\n' \
+            ssh-archive-deploy-linux-x86_64.pex \
+            ssh-archive-deploy-linux-x86_64.pex.sha256) <(printf '%s\n' "${assets}")
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
       - name: Run checks
+        if: steps.release.outputs.exists != 'true'
         run: mise run check
 
       - name: Build and run PEX E2E tests
+        if: steps.release.outputs.exists != 'true'
         run: mise run test:e2e:pex
 
       - name: Smoke test released artifact
+        if: steps.release.outputs.exists != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -72,25 +142,72 @@ jobs:
           )
 
       - name: Generate artifact attestation
-        uses: actions/attest@v4
+        if: steps.release.outputs.exists != 'true'
+        uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
         with:
           subject-path: dist/release/ssh-archive-deploy-linux-x86_64.pex
 
       - name: Create GitHub Release
+        if: steps.release.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
-          MAJOR_TAG: ${{ steps.version.outputs.major-tag }}
+          TARGET: ${{ steps.version.outputs.target }}
+          EVENT_NAME: ${{ steps.version.outputs.event-name }}
         shell: bash
         run: |
           set -euo pipefail
-          target="$(git rev-parse HEAD)"
-          gh release create "${TAG}" \
-            dist/release/ssh-archive-deploy-linux-x86_64.pex \
-            dist/release/ssh-archive-deploy-linux-x86_64.pex.sha256 \
-            --target "${target}" \
-            --title "${TAG}" \
-            --notes "Release ${TAG}"
 
-          git tag --force "${MAJOR_TAG}" "${target}"
+          tag_created=0
+          release_created=0
+          release_published=0
+          cleanup_draft_release() {
+            if [ "${release_created}" = "1" ] && [ "${release_published}" = "0" ]; then
+              if [ "${tag_created}" = "1" ]; then
+                gh release delete "${TAG}" --yes --cleanup-tag || true
+              else
+                gh release delete "${TAG}" --yes || true
+              fi
+            elif [ "${tag_created}" = "1" ] && [ "${release_published}" = "0" ]; then
+              git push --delete origin "${TAG}" || true
+            fi
+          }
+          trap cleanup_draft_release ERR
+
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            git tag "${TAG}" "${TARGET}"
+            git push origin "refs/tags/${TAG}"
+            tag_created=1
+          fi
+
+          gh release create "${TAG}" \
+            --target "${TARGET}" \
+            --title "${TAG}" \
+            --notes "Release ${TAG}" \
+            --draft \
+            --verify-tag
+          release_created=1
+
+          gh release upload "${TAG}" \
+            dist/release/ssh-archive-deploy-linux-x86_64.pex \
+            dist/release/ssh-archive-deploy-linux-x86_64.pex.sha256
+
+          gh release view "${TAG}" \
+            --json assets \
+            --jq '.assets | map(.name) | sort | join("\n")' > /tmp/release-assets.txt
+          diff -u <(printf '%s\n' \
+            ssh-archive-deploy-linux-x86_64.pex \
+            ssh-archive-deploy-linux-x86_64.pex.sha256) /tmp/release-assets.txt
+
+          gh release edit "${TAG}" --draft=false
+          release_published=1
+
+      - name: Move major tag
+        env:
+          MAJOR_TAG: ${{ steps.version.outputs.major-tag }}
+          TARGET: ${{ steps.version.outputs.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag --force "${MAJOR_TAG}" "${TARGET}"
           git push --force origin "refs/tags/${MAJOR_TAG}"

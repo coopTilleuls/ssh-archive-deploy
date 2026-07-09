@@ -71,8 +71,10 @@ Use the moving major tag `@v0` to receive the latest compatible 0.x release
 without changing consumer workflows. Pin an exact release such as `@v0.2.1`
 when a project needs fully immutable action resolution.
 
-The release workflow publishes immutable tags such as `v0.2.1` and moves the
-matching major tag, such as `v0`, to the same tested commit.
+The release workflow publishes immutable releases for exact tags such as
+`v0.2.1`, then moves the major tag, such as `v0`, to the same tested commit.
+The major tag is intentionally mutable and should not be used when a consumer
+requires fully reproducible action resolution.
 
 ## Secrets
 
