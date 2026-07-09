@@ -63,7 +63,7 @@ jobs:
 
           major="${version%%.*}"
           target="$(git rev-parse HEAD)"
-          git fetch origin main --tags --force
+          git fetch --force origin +refs/heads/main:refs/remotes/origin/main
 
           if [ "${EVENT_NAME}" = "push" ]; then
             tag_target="$(git rev-parse "${tag}^{commit}")"
@@ -76,8 +76,8 @@ jobs:
             exit 1
           fi
 
-          if ! git merge-base --is-ancestor "${target}" origin/main; then
-            echo "Release commit must be included in origin/main: ${target}" >&2
+          if ! git merge-base --is-ancestor "${target}" refs/remotes/origin/main; then
+            echo "Release commit must be included in refs/remotes/origin/main: ${target}" >&2
             exit 1
           fi
 
