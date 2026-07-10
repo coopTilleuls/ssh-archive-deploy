@@ -590,6 +590,49 @@ def test_apply_create_handles_leading_dash_paths(tmp_path: Path) -> None:
     assert (root / "-created.txt").read_text(encoding="utf-8") == "new\n"
 
 
+def test_rollback_restore_replaces_raced_target_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "remote"
+    target_dir = tmp_path / "deploy/transactions/tx-1"
+    before = tmp_path / "before"
+    outside = tmp_path / "outside.php"
+    root.mkdir()
+    target_dir.mkdir(parents=True)
+    before.mkdir()
+    restored = before / "index.php"
+    restored.write_text("old\n", encoding="utf-8")
+    write_tar(target_dir / "before.tar.gz", before)
+    current = root / "index.php"
+    current.write_text("artifact\n", encoding="utf-8")
+    outside.write_text("outside\n", encoding="utf-8")
+    plan = plan_with(
+        ExecutionOperation(
+            "replace",
+            "index.php",
+            "root",
+            current.stat().st_size,
+            sha256=sha256_file(current),
+            remote_sha256_before=sha256_file(restored),
+            remote_size_before=restored.stat().st_size,
+        ),
+    )
+    script = rollback_script(config_for(root), str(target_dir), plan).replace(
+        'extract_confined_file replace "$checkpoint_extract" index.php;',
+        (
+            'rm -f "$root"/index.php;\n'
+            'ln -s ../outside.php "$root"/index.php;\n'
+            'extract_confined_file replace "$checkpoint_extract" index.php;'
+        ),
+        1,
+    )
+
+    result = run_script(script)
+
+    assert result.returncode == 0, result.stderr
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+    assert not current.is_symlink()
+    assert current.read_text(encoding="utf-8") == "old\n"
+
+
 def test_rollback_script_does_not_extract_through_symlink_parent(tmp_path: Path) -> None:
     root = tmp_path / "remote"
     target_dir = tmp_path / "deploy/transactions/tx-1"

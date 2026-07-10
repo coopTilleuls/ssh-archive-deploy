@@ -1,7 +1,17 @@
 # ssh-archive-deploy
 
 `ssh-archive-deploy` builds a scoped deployment archive, compares it with a
-remote server over SSH, and can apply or rollback that archive transactionally.
+remote server over SSH, and can apply it with remote checkpoints and rollback
+support.
+
+## Project Status
+
+> [!WARNING]
+> This project is experimental. Its configuration, remote requirements, and
+> mutating deployment guarantees may change while it is evaluated against real
+> managed-hosting environments. Start with the read-only `report` mode, verify
+> the target server capabilities, and do not use `apply` or `rollback` for
+> unattended production deployments without project-specific validation.
 
 - `build` creates an archive from git-tracked, allowlisted files.
 - `validate` checks the archive and manifest safety contract.
