@@ -483,7 +483,7 @@ def test_apply_script_does_not_follow_raced_destination_symlink(tmp_path: Path) 
     assert current.read_text(encoding="utf-8") == "new\n"
 
 
-def test_apply_script_rejects_raced_parent_symlink_without_writing_outside(
+def test_apply_script_does_not_follow_raced_parent_symlink_outside_root(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "remote"
@@ -523,8 +523,10 @@ def test_apply_script_rejects_raced_parent_symlink_without_writing_outside(
 
     result = run_script(script)
 
-    assert result.returncode != 0
+    assert result.returncode == 0, result.stderr
     assert not (outside / "target.txt").exists()
+    assert not (root / "dir").is_symlink()
+    assert current.read_text(encoding="utf-8") == "new\n"
 
 
 def test_apply_create_rejects_raced_destination_symlink_without_writing_outside(

@@ -751,7 +751,32 @@ def confined_mutation_functions() -> str:
   source_root="$2"
   relpath="$3"
   tmp_archive="$(mktemp)"
-  tar -C "$source_root" -cf "$tmp_archive" -- "$relpath" || {
+  parent="${relpath%/*}"
+  set --
+  if [ "$parent" != "$relpath" ]; then
+    current=""
+    remaining="$parent"
+    while [ -n "$remaining" ]; do
+      case "$remaining" in
+        */*)
+          part="${remaining%%/*}"
+          remaining="${remaining#*/}"
+          ;;
+        *)
+          part="$remaining"
+          remaining=""
+          ;;
+      esac
+      if [ -z "$current" ]; then
+        current="$part"
+      else
+        current="$current/$part"
+      fi
+      set -- "$@" "$current"
+    done
+  fi
+  set -- "$@" "$relpath"
+  tar -C "$source_root" -cf "$tmp_archive" --no-recursion -- "$@" || {
     status="$?"
     rm -f "$tmp_archive"
     return "$status"
@@ -763,7 +788,7 @@ def confined_mutation_functions() -> str:
       return "$status"
     }
   elif [ "$mode" = "replace" ]; then
-    tar -C "$root" -xf "$tmp_archive" || {
+    tar -C "$root" --no-overwrite-dir -xf "$tmp_archive" || {
       status="$?"
       rm -f "$tmp_archive"
       return "$status"
