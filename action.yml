@@ -90,8 +90,8 @@ runs:
         asset="ssh-archive-deploy-linux-x86_64.pex"
         case "${CI_SOURCE_BUILD}" in
           true)
-            action_path="${ACTION_PATH%/}"
-            workspace="${WORKSPACE%/}"
+            action_path="$(cd "${ACTION_PATH}" && pwd -P)"
+            workspace="$(cd "${WORKSPACE}" && pwd -P)"
             if [ "${EVENT_NAME}" != "pull_request" ] || [ "${action_path}" != "${workspace}" ]; then
               echo "CI source builds are restricted to pull requests using the local root Action." >&2
               exit 1
