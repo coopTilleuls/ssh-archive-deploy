@@ -99,7 +99,7 @@ and preserves remote-only files. It exposes these outputs:
 - `rollback-command`
 
 For `mode: rollback`, set `rollback-release: latest`. Historical rollback to an
-arbitrary transaction id is not part of V1.
+arbitrary transaction id is not part of the current experimental contract.
 
 Use the moving major tag `@v0` to receive the latest compatible 0.x release
 without changing consumer workflows. Pin an exact release such as `@v0.2.1`

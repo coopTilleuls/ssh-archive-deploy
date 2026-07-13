@@ -75,7 +75,7 @@ def test_rollback_plan_operations_must_match_transaction() -> None:
 def config_for() -> DeployConfig:
     return parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/srv/deploy"},
             "scope": [{"name": "root", "source": ".", "target": "."}],

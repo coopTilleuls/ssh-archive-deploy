@@ -40,7 +40,7 @@ The current CLI uses Python `argparse` and exposes these commands:
 - `apply`
 - `rollback`
 
-`apply` supports the V1 overlay deployment flow. `rollback` supports
+`apply` supports the current overlay deployment flow. `rollback` supports
 `--release latest`. The first `usage` integration must preserve that behavior
 without widening the deployment contract.
 
@@ -60,7 +60,7 @@ Recommended progression:
 6. Re-evaluate whether parsing should move from `argparse` to `usage` after the
    CLI contract stabilizes.
 
-This keeps risk low: the V1 command behavior remains controlled by the Python
+This keeps risk low: the current command behavior remains controlled by the Python
 tests, while `usage` improves the public interface around it.
 
 ## Spec Source Options

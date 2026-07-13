@@ -31,7 +31,7 @@ def test_execution_plan_classifies_overlay_operations(tmp_path: Path) -> None:
 
     config = parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/srv/deploy"},
             "scope": [{"name": "theme", "source": "theme", "target": "theme"}],
@@ -150,7 +150,7 @@ def test_execution_plan_json_roundtrip(tmp_path: Path) -> None:
     (artifact / "index.html").write_text("new\n", encoding="utf-8")
     config = parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/srv/deploy"},
             "scope": [{"name": "root", "source": ".", "target": "."}],

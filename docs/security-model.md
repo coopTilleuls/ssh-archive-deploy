@@ -6,9 +6,13 @@ accidental data loss.
 
 ## Local Packaging
 
-- Sources are selected from `git ls-files`, so ignored files are not packaged.
+- Sources are selected from `git ls-files`. Ignored or otherwise untracked
+  build products are packaged only when a version 2 scope explicitly declares
+  them under `generated`.
 - Absolute sources and `..` path segments are rejected.
-- Symlinks are rejected in V1.
+- Symlinks are rejected for both tracked files and generated inputs.
+- Generated inputs must stay inside their scope source, be non-empty after
+  exclusions, and must not overlap Git-tracked files or another input.
 - Archive validation rejects absolute paths, `..`, and unsupported tar entry
   types.
 
@@ -54,7 +58,8 @@ accidental data loss.
 
 The configured target strategy is `overlay`: files from the archive are written
 over matching remote files, new files are created, and unknown remote files are
-kept. Destructive deletion of unknown remote files is not supported in V1.
+kept. Destructive deletion of unknown remote files is not supported by the
+current experimental contract.
 
 `rollback` is limited to `latest`. It is designed to undo the latest successful
 apply transaction, not to restore an arbitrary historical server state.

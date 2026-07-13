@@ -2,8 +2,12 @@
 
 Consumers define deployment scope in a versioned YAML file.
 
+> [!IMPORTANT]
+> Configuration version 2 is currently available on the unreleased `main`
+> branch. Release `v0.2.5` still expects version 1.
+
 ```yaml
-version: 1
+version: 2
 
 project: example
 
@@ -28,6 +32,10 @@ scope:
       - assets/**
     exclude:
       - assets/cache/**
+    generated:
+      - path: vendor
+        required_paths:
+          - autoload.php
 
 exclude:
   - .env
@@ -36,7 +44,7 @@ exclude:
 
 Rules:
 
-- `version` must be the integer `1`.
+- `version` must be the integer `2`. Version 1 configurations are rejected.
 - `remote.root` must be an absolute path and cannot be `/`.
 - `remote.workdir` must be an absolute path. Mutating modes use it for locks,
   baselines, checkpoints, transactions, and pointers.
@@ -47,11 +55,26 @@ Rules:
 - Global excludes are matched against archive paths relative to `remote.root`.
 - Scope excludes are matched both against paths relative to the scope source and
   paths relative to `remote.root`.
+- `scope[].generated` is the explicit allowlist for build products that are not
+  tracked by Git. Each `path` is relative to `scope[].source` and can name a
+  regular file or directory.
+- Every generated input is mandatory and must contribute at least one regular
+  file after exclusions. Generated inputs cannot overlap each other or a
+  Git-tracked file.
+- `required_paths` is optional. Each entry is relative to its generated input
+  and must exist and contribute packaged content; for example, `autoload.php`
+  above checks `public/vendor/autoload.php`.
+- Generated files use the same global and scope exclusions as tracked files.
+  Scope `include` patterns do not restrict them because each generated path is
+  already explicitly allowlisted.
+- Generated symlinks, special files, path escapes, and target collisions are
+  rejected. The version 2 manifest records which files each generated input
+  contributed.
 - `strategy.apply` only accepts `overlay`: files from the archive are written
   over matching remote files, new files are created, and unknown remote files
   are preserved.
 - `strategy.delete_unknown` must stay `false`; destructive replacement is not
-  part of V1.
+  part of the current experimental contract.
 - Mutating modes require GNU tar with `--keep-old-files` support on the remote
   server. They do not require Python on the remote server.
 - Scalar values are parsed strictly. For example, `delete_unknown: "false"` and
@@ -161,7 +184,7 @@ transactions/
 pointers/
 ```
 
-V1 does not support `delete_unknown=true`, forced lock cleanup, automatic
+The current contract does not support `delete_unknown=true`, forced lock cleanup, automatic
 recovery of unknown transaction states, or rollback to an arbitrary historical
 id.
 

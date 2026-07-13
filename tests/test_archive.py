@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import tarfile
 from pathlib import Path
@@ -10,12 +12,13 @@ import pytest
 
 from ssh_archive_deploy.archive import (
     MANIFEST_NAME,
+    MANIFEST_VERSION,
     build_archive,
     first_duplicate_name,
     read_manifest_from_archive,
     validate_archive,
 )
-from ssh_archive_deploy.config import parse_config
+from ssh_archive_deploy.config import DeployConfig, parse_config
 from ssh_archive_deploy.errors import DeployError
 
 
@@ -28,6 +31,31 @@ def init_repo(path: Path) -> None:
 def commit_all(path: Path) -> None:
     subprocess.run(["git", "add", "."], cwd=path, check=True)
     subprocess.run(["git", "commit", "-m", "test"], cwd=path, check=True, stdout=subprocess.PIPE)
+
+
+def generated_config(
+    *,
+    generated: list[dict[str, object]],
+    exclude: list[str] | None = None,
+    include: list[str] | None = None,
+) -> DeployConfig:
+    return parse_config(
+        {
+            "version": 2,
+            "project": "demo",
+            "remote": {"root": "/var/www/html", "workdir": "/.deploy/demo"},
+            "scope": [
+                {
+                    "name": "theme",
+                    "source": "theme",
+                    "target": "wp-content/themes/demo",
+                    "include": include or [],
+                    "exclude": exclude or [],
+                    "generated": generated,
+                },
+            ],
+        },
+    )
 
 
 def test_build_uses_git_tracked_files_and_excludes(
@@ -45,7 +73,7 @@ def test_build_uses_git_tracked_files_and_excludes(
 
     config = parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/.deploy/demo"},
             "scope": [
@@ -79,7 +107,7 @@ def test_build_rejects_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
     config = parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/.deploy/demo"},
             "scope": [{"name": "theme", "source": "theme", "target": "theme"}],
@@ -90,13 +118,247 @@ def test_build_rejects_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         build_archive(config, tmp_path / "site.tar.gz", "release-1")
 
 
+def test_build_includes_declared_generated_composer_product(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    fixture = Path(__file__).parent / "fixtures/generated-composer"
+    shutil.copytree(fixture / "project/theme", tmp_path / "theme")
+    (tmp_path / "theme/index.php").write_text("<?php\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("theme/vendor/\n", encoding="utf-8")
+    commit_all(tmp_path)
+    shutil.copytree(fixture / "generated/vendor", tmp_path / "theme/vendor")
+    monkeypatch.chdir(tmp_path)
+
+    config = generated_config(
+        generated=[{"path": "vendor", "required_paths": ["autoload.php"]}],
+        include=["index.php"],
+    )
+    archive = tmp_path / "site.tar.gz"
+
+    manifest = build_archive(config, archive, "release-1")
+
+    assert manifest.version == MANIFEST_VERSION
+    assert [item.path for item in manifest.files] == [
+        "wp-content/themes/demo/index.php",
+        "wp-content/themes/demo/vendor/autoload.php",
+        "wp-content/themes/demo/vendor/composer/installed.php",
+    ]
+    assert manifest.scopes[0].generated[0].path == "vendor"
+    assert manifest.scopes[0].generated[0].required_paths == ["autoload.php"]
+    assert manifest.scopes[0].generated[0].files == [
+        "wp-content/themes/demo/vendor/autoload.php",
+        "wp-content/themes/demo/vendor/composer/installed.php",
+    ]
+    validate_archive(archive, config)
+
+
+def test_build_accepts_generated_only_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme").mkdir()
+    (tmp_path / ".gitignore").write_text("theme/build/\n", encoding="utf-8")
+    commit_all(tmp_path)
+    (tmp_path / "theme/build").mkdir()
+    (tmp_path / "theme/build/app.js").write_text("built\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    manifest = build_archive(
+        generated_config(generated=[{"path": "build"}]),
+        tmp_path / "site.tar.gz",
+        "release-1",
+    )
+
+    assert [item.path for item in manifest.files] == ["wp-content/themes/demo/build/app.js"]
+
+
+def test_build_accepts_generated_regular_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme").mkdir()
+    (tmp_path / ".gitignore").write_text("theme/build.css\n", encoding="utf-8")
+    commit_all(tmp_path)
+    (tmp_path / "theme/build.css").write_text("built\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    manifest = build_archive(
+        generated_config(generated=[{"path": "build.css"}]),
+        tmp_path / "site.tar.gz",
+        "release-1",
+    )
+
+    assert [item.path for item in manifest.files] == ["wp-content/themes/demo/build.css"]
+
+
+def test_build_rejects_missing_generated_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme").mkdir()
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    commit_all(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError, match="Generated input is missing"):
+        build_archive(
+            generated_config(generated=[{"path": "vendor"}]),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_build_rejects_empty_generated_input_after_exclusions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme/vendor").mkdir(parents=True)
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("theme/vendor/\n", encoding="utf-8")
+    commit_all(tmp_path)
+    (tmp_path / "theme/vendor/cache.php").write_text("cache\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError, match="must contribute at least one file"):
+        build_archive(
+            generated_config(generated=[{"path": "vendor"}], exclude=["vendor/**"]),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_build_rejects_missing_generated_required_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme/vendor").mkdir(parents=True)
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("theme/vendor/\n", encoding="utf-8")
+    commit_all(tmp_path)
+    (tmp_path / "theme/vendor/package.php").write_text("package\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError, match="required path is missing"):
+        build_archive(
+            generated_config(
+                generated=[{"path": "vendor", "required_paths": ["autoload.php"]}],
+            ),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_build_rejects_excluded_generated_required_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme/vendor").mkdir(parents=True)
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("theme/vendor/\n", encoding="utf-8")
+    commit_all(tmp_path)
+    (tmp_path / "theme/vendor/autoload.php").write_text("autoload\n", encoding="utf-8")
+    (tmp_path / "theme/vendor/package.php").write_text("package\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError, match="required path is excluded"):
+        build_archive(
+            generated_config(
+                generated=[{"path": "vendor", "required_paths": ["autoload.php"]}],
+                exclude=["vendor/autoload.php"],
+            ),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_build_rejects_generated_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme/vendor").mkdir(parents=True)
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("theme/vendor/\n", encoding="utf-8")
+    commit_all(tmp_path)
+    (tmp_path / "theme/vendor/autoload.php").symlink_to("../index.php")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError, match="generated symlink"):
+        build_archive(
+            generated_config(generated=[{"path": "vendor"}]),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_build_rejects_generated_special_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme/vendor").mkdir(parents=True)
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("theme/vendor/\n", encoding="utf-8")
+    commit_all(tmp_path)
+    os.mkfifo(tmp_path / "theme/vendor/build.pipe")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError, match="Unsupported generated input type"):
+        build_archive(
+            generated_config(generated=[{"path": "vendor"}]),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_build_rejects_generated_overlap_with_tracked_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme/vendor").mkdir(parents=True)
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    (tmp_path / "theme/vendor/autoload.php").write_text("autoload\n", encoding="utf-8")
+    commit_all(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError, match="overlaps a Git-tracked file"):
+        build_archive(
+            generated_config(generated=[{"path": "vendor"}], include=["index.php"]),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_validate_archive_rejects_manifest_version_one(tmp_path: Path) -> None:
+    manifest_path = tmp_path / MANIFEST_NAME
+    manifest_path.write_text(
+        json.dumps({"version": 1, "scopes": [], "files": []}),
+        encoding="utf-8",
+    )
+    archive = tmp_path / "site.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(manifest_path, arcname=MANIFEST_NAME, recursive=False)
+
+    with pytest.raises(DeployError, match="Unsupported archive manifest version"):
+        validate_archive(archive)
+
+
 def test_validate_archive_rejects_checksum_mismatch(tmp_path: Path) -> None:
     package = tmp_path / "package"
     package.mkdir()
     (package / "theme").mkdir()
     (package / "theme/index.php").write_text("actual\n", encoding="utf-8")
-    manifest = {
-        "version": 1,
+    manifest: dict[str, object] = {
+        "version": MANIFEST_VERSION,
         "tool_version": "test",
         "project": "demo",
         "release_id": "release-1",
@@ -109,6 +371,7 @@ def test_validate_archive_rejects_checksum_mismatch(tmp_path: Path) -> None:
                 "source": "theme",
                 "target": "theme",
                 "files": ["theme/index.php"],
+                "generated": [],
             },
         ],
         "files": [
@@ -134,8 +397,8 @@ def test_validate_archive_rejects_non_canonical_member_path(tmp_path: Path) -> N
     package = tmp_path / "package"
     package.mkdir()
     (package / "index.php").write_text("actual\n", encoding="utf-8")
-    manifest = {
-        "version": 1,
+    manifest: dict[str, object] = {
+        "version": MANIFEST_VERSION,
         "tool_version": "test",
         "project": "demo",
         "release_id": "release-1",
@@ -148,6 +411,7 @@ def test_validate_archive_rejects_non_canonical_member_path(tmp_path: Path) -> N
                 "source": ".",
                 "target": ".",
                 "files": ["./index.php"],
+                "generated": [],
             },
         ],
         "files": [
@@ -173,8 +437,8 @@ def test_validate_archive_rejects_control_character_member_path(tmp_path: Path) 
     package = tmp_path / "package"
     package.mkdir()
     (package / "index.php").write_text("actual\n", encoding="utf-8")
-    manifest = {
-        "version": 1,
+    manifest: dict[str, object] = {
+        "version": MANIFEST_VERSION,
         "tool_version": "test",
         "project": "demo",
         "release_id": "release-1",
@@ -187,6 +451,7 @@ def test_validate_archive_rejects_control_character_member_path(tmp_path: Path) 
                 "source": ".",
                 "target": ".",
                 "files": ["dir/file\nother.php"],
+                "generated": [],
             },
         ],
         "files": [

@@ -118,8 +118,13 @@ published PEX and verify its attestation; no dedicated token input is required.
 
 Consumers define the deployment scope in `deploy.yml`.
 
+> [!IMPORTANT]
+> The unreleased `main` branch uses configuration version 2 and rejects version
+> 1. The latest published release, `v0.2.5`, still uses version 1; keep its
+> configuration until a version 2 release is published.
+
 ```yaml
-version: 1
+version: 2
 
 project: example
 
@@ -135,6 +140,10 @@ scope:
   - name: theme
     source: wp-content/themes/example
     target: wp-content/themes/example
+    generated:
+      - path: vendor
+        required_paths:
+          - autoload.php
 
 exclude:
   - .git/**
@@ -143,7 +152,8 @@ exclude:
 ```
 
 See [docs/configuration.md](docs/configuration.md) for the full configuration
-and report schema contract.
+and report schema contract. The `generated` block is optional; declare it only
+for untracked build products that must enter the deployment archive.
 
 ## Report Output
 

@@ -36,7 +36,7 @@ def test_report_is_grouped_by_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     config = parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/.deploy/demo"},
             "scope": [{"name": "theme", "source": "theme", "target": "theme"}],
@@ -123,7 +123,7 @@ def test_planner_classifies_overlay_operations(tmp_path: Path) -> None:
 
     config = parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/.deploy/demo"},
             "strategy": {"apply": "overlay", "delete_unknown": False},
@@ -155,7 +155,7 @@ def test_planner_ignores_root_manifest_for_dot_target(tmp_path: Path) -> None:
 
     config = parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/.deploy/demo"},
             "strategy": {"apply": "overlay", "delete_unknown": False},
