@@ -1,10 +1,36 @@
 # Consumer Workflow
 
-Use the GitHub Action to generate a deployment report, apply a reviewed archive,
-or rollback the latest successful apply transaction from a consumer repository.
+Use the GitHub Action to inspect a remote target, generate a deployment report,
+apply a reviewed archive, or rollback the latest successful apply transaction
+from a consumer repository.
 
-Start with `workflow_dispatch`. Do not wire automatic deploys until the report
-is clean and the repository has been reconciled with the server state.
+Start with `workflow_dispatch`. Run `doctor` before the first report or mutation,
+and do not wire automatic deploys until the capabilities are understood, the
+report is clean, and the repository has been reconciled with the server state.
+
+```yaml
+- uses: coopTilleuls/ssh-archive-deploy@v0
+  with:
+    mode: doctor
+    config: deploy.yml
+    target-name: production
+    report-dir: dist/deploy-doctor
+    ssh-host: ${{ secrets.SSH_HOST }}
+    ssh-user: ${{ secrets.SSH_USER }}
+    ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    ssh-known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+
+- uses: actions/upload-artifact@v7
+  if: always()
+  with:
+    name: deploy-doctor
+    path: dist/deploy-doctor
+```
+
+Use a non-secret `target-name`, such as a GitHub Environment name. The doctor
+result deliberately does not contain the raw SSH host or credentials.
+
+After doctor, generate the drift report:
 
 ```yaml
 name: Deployment Report
@@ -53,6 +79,14 @@ For `mode: report`, the action:
 6. compares the archive with the remote server over SSH;
 7. writes `report.json`, per-scope text files, and a GitHub Actions job summary.
 
+For `mode: doctor`, the action performs steps 1 through 4, skips archive
+construction, then inventories the remote portable command profile, tar
+implementation/version/options, and observable root/workdir permissions. It
+writes `${report-dir}/doctor.json`, exposes that path as `doctor-report`, and
+adds a concise job summary. The JSON verdict can be `compatible`,
+`incompatible`, or `undetermined`; untested tar versions are never assumed to
+be compatible.
+
 Consumers do not install `uv` or Python dependencies at workflow runtime.
 
 For `mode: apply`, the action builds the archive, creates a remote checkpoint
@@ -87,9 +121,11 @@ Required SSH inputs:
 
 Use repository or environment secrets for these values. The private key should
 be a deployment key dedicated to the target server. `ssh-known-hosts` should
-contain the expected host key. It is required for `apply` and `rollback`; those
-modes fail before connecting if no known-hosts file is configured. `report`
-may still run with the CLI fallback host-key policy for read-only inspection.
+contain the expected host key. It is required by default for every SSH mode,
+which makes `doctor` and `report` reproducible as well as safe. Read-only first
+contact may explicitly set `ssh-allow-host-key-discovery: "true"`; this option
+is rejected for `apply` and `rollback`, does not persist the observed key, and
+should be replaced with pinned known-hosts material before normal use.
 
 The action uses the job `GITHUB_TOKEN` to download its published PEX release
 asset and verify the artifact attestation. Keep `permissions: contents: read`

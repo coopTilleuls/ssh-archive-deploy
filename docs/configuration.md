@@ -62,6 +62,76 @@ Rules:
 - `backup.baseline_id` names the protected initial server baseline. The baseline
   is created before the first apply when absent and is not removed by retention.
 
+## Doctor Contract
+
+`doctor` reads the deployment configuration but does not require an archive. It
+executes observation-only checks over SSH and writes a versioned JSON result. A
+non-secret `--target-name` distinguishes environments without persisting the SSH
+host, user, key path, or raw tool output.
+
+The portable command profile is `sh`, `tar`, `cp`, `mkdir`, and `rm`. Missing
+optional tools are reported but do not reduce compatibility. `tar` compatibility
+uses both its normalized implementation/version and the options found in its
+runtime help. Only implementation/version pairs exercised by SSH E2E tests are
+`compatible`; an otherwise plausible but untested pair is `undetermined`.
+The initial tested matrix contains GNU tar 1.34, as provided by the Debian 12.11
+SSH E2E image.
+
+`remote.root` must be an existing readable directory. `remote.workdir` is
+observed with shell permission tests only. Its `writable_hint` is not proof that
+a real write will succeed, and `doctor` never creates it or writes a probe file.
+An absent workdir therefore makes the overall result `undetermined`; actual
+write access remains an `apply` preflight check.
+
+```json
+{
+  "schema_version": 1,
+  "operation": "doctor",
+  "checked_at": "2026-07-10T12:30:00Z",
+  "project": "example",
+  "target": {"name": "production"},
+  "ssh": {"host_key_policy": "strict"},
+  "compatibility": "compatible",
+  "commands": {
+    "required": [{"name": "sh", "available": true}],
+    "optional": [{"name": "rsync", "available": false}],
+    "absent": ["rsync"]
+  },
+  "tar": {
+    "available": true,
+    "implementation": "gnu",
+    "version": "1.34",
+    "version_status": "tested",
+    "options": {"--create": true},
+    "compatibility": "compatible"
+  },
+  "remote": {
+    "root": {
+      "exists": true,
+      "directory": true,
+      "readable": true,
+      "writable_hint": true
+    },
+    "workdir": {
+      "exists": true,
+      "directory": true,
+      "readable": true,
+      "writable_hint": true
+    }
+  },
+  "diagnostics": []
+}
+```
+
+The abbreviated arrays and tar option mapping above illustrate the schema; real
+results contain every probed command and required tar option. Compatibility
+uses this precedence: `incompatible`, then `undetermined`, then `compatible`.
+The command exits successfully when inspection and serialization succeed, so
+automation that needs a compatible server must inspect the JSON verdict.
+
+`summarize-doctor --format github` renders the result without changing the
+schema.
+
 ## Apply And Rollback Contract
 
 `apply` validates the archive, takes a remote lock, computes a fresh execution

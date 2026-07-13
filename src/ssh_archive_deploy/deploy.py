@@ -324,6 +324,8 @@ def validate_mutating_config(config: DeployConfig) -> None:
 
 
 def validate_mutating_ssh(ssh: SshConfig) -> None:
+    if ssh.allow_host_key_discovery:
+        raise DeployError("Host-key discovery is not allowed for mutating modes.")
     if not ssh.known_hosts_file:
         raise DeployError("SSH known_hosts file is required for apply and rollback modes.")
 

@@ -1,9 +1,9 @@
 name: SSH Archive Deploy
-description: Build, report, apply, and rollback a scoped deployment archive over SSH.
+description: Inspect, build, report, apply, and rollback a scoped deployment archive over SSH.
 
 inputs:
   mode:
-    description: Deployment mode. Supported values are report, apply, and rollback.
+    description: Deployment mode. Supported values are doctor, report, apply, and rollback.
     required: true
     default: report
   config:
@@ -15,13 +15,16 @@ inputs:
     required: true
     default: dist/site.tar.gz
   report-dir:
-    description: Directory where report artifacts are written.
+    description: Directory where doctor or report artifacts are written.
     required: false
     default: dist/deploy-report
   rollback-release:
     description: Reserved rollback target input.
     required: false
     default: latest
+  target-name:
+    description: Non-secret target label required in doctor mode (for example preproduction).
+    required: false
   ssh-host:
     description: SSH host.
     required: false
@@ -36,8 +39,12 @@ inputs:
     description: SSH private key content.
     required: false
   ssh-known-hosts:
-    description: Known hosts content. Required for apply and rollback.
+    description: Known hosts content. Required by default for every SSH mode.
     required: false
+  ssh-allow-host-key-discovery:
+    description: Explicit permissive host-key discovery for doctor or report only.
+    required: false
+    default: "false"
 outputs:
   release-id:
     description: Release id from the generated manifest.
@@ -46,8 +53,11 @@ outputs:
     description: Manifest path written by the CLI.
     value: ${{ steps.export.outputs.manifest-path }}
   report-dir:
-    description: Report directory.
+    description: Doctor or report directory.
     value: ${{ inputs.report-dir }}
+  doctor-report:
+    description: Doctor JSON report path in doctor mode.
+    value: ${{ inputs.report-dir }}/doctor.json
   transaction-id:
     description: Transaction id written by apply or rollback.
     value: ${{ steps.export.outputs.transaction-id }}
@@ -77,51 +87,85 @@ runs:
           exit 1
         fi
 
-        version="$(
-          python -c 'import pathlib,tomllib; print(tomllib.loads(pathlib.Path("'"$GITHUB_ACTION_PATH"'/pyproject.toml").read_text())["project"]["version"])'
-        )"
-
         asset="ssh-archive-deploy-linux-x86_64.pex"
-        install_dir="$RUNNER_TEMP/ssh-archive-deploy"
-        tag="v${version}"
+        case "${CI_SOURCE_BUILD}" in
+          true)
+            action_path="$(cd "${ACTION_PATH}" && pwd -P)"
+            workspace="$(cd "${WORKSPACE}" && pwd -P)"
+            if [ "${EVENT_NAME}" != "pull_request" ] || [ "${action_path}" != "${workspace}" ]; then
+              echo "CI source builds are restricted to pull requests using the local root Action." >&2
+              exit 1
+            fi
 
-        mkdir -p "$install_dir"
+            binary="${action_path}/dist/release/${asset}"
+            checksum="${binary}.sha256"
+            if [ ! -x "${binary}" ] || [ ! -f "${checksum}" ]; then
+              echo "CI source PEX or checksum is missing; build the current checkout first." >&2
+              exit 1
+            fi
+            (
+              cd "$(dirname "${binary}")"
+              sha256sum --check "$(basename "${checksum}")"
+            )
+            "${binary}" doctor --help >/dev/null
+            "${binary}" summarize-doctor --help >/dev/null
+            echo "Using PEX built from the pull-request checkout: ${binary}"
+            ;;
+          false|"")
+            version="$(
+              python -c 'import pathlib,tomllib; print(tomllib.loads(pathlib.Path("'"$ACTION_PATH"'/pyproject.toml").read_text())["project"]["version"])'
+            )"
+            install_dir="$RUNNER_TEMP/ssh-archive-deploy"
+            tag="v${version}"
 
-        gh release download "${tag}" \
-          --repo "${ACTION_REPOSITORY}" \
-          --pattern "${asset}" \
-          --pattern "${asset}.sha256" \
-          --dir "${install_dir}" \
-          --clobber
+            mkdir -p "$install_dir"
 
-        (
-          cd "$install_dir"
-          sha256sum --check "$asset.sha256"
-        )
+            gh release download "${tag}" \
+              --repo "${ACTION_REPOSITORY}" \
+              --pattern "${asset}" \
+              --pattern "${asset}.sha256" \
+              --dir "${install_dir}" \
+              --clobber
 
-        tag_ref="repos/${ACTION_REPOSITORY}/git/ref/tags/${tag}"
-        expected_source_digest="$(gh api "$tag_ref" --jq .object.sha)"
-        tag_object_type="$(gh api "$tag_ref" --jq .object.type)"
-        if [ "$tag_object_type" = "tag" ]; then
-          expected_source_digest="$(
-            gh api \
-              "repos/${ACTION_REPOSITORY}/git/tags/${expected_source_digest}" \
-              --jq .object.sha
-          )"
-        fi
+            (
+              cd "$install_dir"
+              sha256sum --check "$asset.sha256"
+            )
 
-        gh attestation verify "$install_dir/$asset" \
-          --repo "${ACTION_REPOSITORY}" \
-          --signer-workflow "${ACTION_REPOSITORY}/.github/workflows/release.yml" \
-          --source-digest "${expected_source_digest}" \
-          --deny-self-hosted-runners
+            tag_ref="repos/${ACTION_REPOSITORY}/git/ref/tags/${tag}"
+            expected_source_digest="$(gh api "$tag_ref" --jq .object.sha)"
+            tag_object_type="$(gh api "$tag_ref" --jq .object.type)"
+            if [ "$tag_object_type" = "tag" ]; then
+              expected_source_digest="$(
+                gh api \
+                  "repos/${ACTION_REPOSITORY}/git/tags/${expected_source_digest}" \
+                  --jq .object.sha
+              )"
+            fi
 
-        chmod +x "$install_dir/$asset"
+            gh attestation verify "$install_dir/$asset" \
+              --repo "${ACTION_REPOSITORY}" \
+              --signer-workflow "${ACTION_REPOSITORY}/.github/workflows/release.yml" \
+              --source-digest "${expected_source_digest}" \
+              --deny-self-hosted-runners
 
-        echo "binary=$install_dir/$asset" >> "$GITHUB_OUTPUT"
+            chmod +x "$install_dir/$asset"
+            binary="$install_dir/$asset"
+            ;;
+          *)
+            echo "SSH_ARCHIVE_DEPLOY_CI_SOURCE_BUILD must be true or false." >&2
+            exit 1
+            ;;
+        esac
+
+        echo "binary=${binary}" >> "$GITHUB_OUTPUT"
       env:
         ACTION_REPOSITORY: ${{ github.action_repository }}
+        ACTION_PATH: ${{ github.action_path }}
+        CI_SOURCE_BUILD: ${{ env.SSH_ARCHIVE_DEPLOY_CI_SOURCE_BUILD }}
+        EVENT_NAME: ${{ github.event_name }}
         GH_TOKEN: ${{ github.token }}
+        WORKSPACE: ${{ github.workspace }}
 
     - name: Configure SSH
       id: ssh
@@ -165,12 +209,45 @@ runs:
       run: |
         set -euo pipefail
 
+        discovery_args=()
+        case "${ALLOW_HOST_KEY_DISCOVERY}" in
+          false)
+            ;;
+          true)
+            case "${MODE}" in
+              doctor|report)
+                discovery_args+=(--allow-host-key-discovery)
+                ;;
+              *)
+                echo "Host-key discovery is only allowed in doctor or report mode." >&2
+                exit 2
+                ;;
+            esac
+            ;;
+          *)
+            echo "ssh-allow-host-key-discovery must be true or false." >&2
+            exit 2
+            ;;
+        esac
+
         case "${MODE}" in
+          doctor)
+            if [ -z "${TARGET_NAME}" ]; then
+              echo "target-name is required in doctor mode." >&2
+              exit 2
+            fi
+            "$SSH_ARCHIVE_DEPLOY_BIN" doctor \
+              --config "${CONFIG}" \
+              --target-name "${TARGET_NAME}" \
+              --output "${REPORT_DIR}/doctor.json" \
+              "${discovery_args[@]}"
+            ;;
           report)
             "$SSH_ARCHIVE_DEPLOY_BIN" report \
               --config "${CONFIG}" \
               --archive "${ARCHIVE}" \
-              --output-dir "${REPORT_DIR}"
+              --output-dir "${REPORT_DIR}" \
+              "${discovery_args[@]}"
             ;;
           apply)
             "$SSH_ARCHIVE_DEPLOY_BIN" apply \
@@ -194,6 +271,8 @@ runs:
         CONFIG: ${{ inputs.config }}
         ARCHIVE: ${{ inputs.archive }}
         REPORT_DIR: ${{ inputs.report-dir }}
+        TARGET_NAME: ${{ inputs.target-name }}
+        ALLOW_HOST_KEY_DISCOVERY: ${{ inputs.ssh-allow-host-key-discovery }}
         ROLLBACK_RELEASE: ${{ inputs.rollback-release }}
         RESULT_JSON: ${{ runner.temp }}/ssh-archive-deploy-result.json
         SSH_HOST: ${{ inputs.ssh-host }}
@@ -202,18 +281,28 @@ runs:
         PEX_ROOT: ${{ runner.temp }}/ssh-archive-deploy-pex
         SSH_ARCHIVE_DEPLOY_BIN: ${{ steps.install.outputs.binary }}
 
-    - name: Write report summary
-      if: ${{ inputs.mode == 'report' }}
+    - name: Write read-only summary
+      if: ${{ inputs.mode == 'doctor' || inputs.mode == 'report' }}
       shell: bash
       run: |
         set -euo pipefail
 
         if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-          "$SSH_ARCHIVE_DEPLOY_BIN" summarize-report \
-            --report "${REPORT_DIR}/report.json" \
-            --format github >> "$GITHUB_STEP_SUMMARY"
+          case "${MODE}" in
+            doctor)
+              "$SSH_ARCHIVE_DEPLOY_BIN" summarize-doctor \
+                --report "${REPORT_DIR}/doctor.json" \
+                --format github >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            report)
+              "$SSH_ARCHIVE_DEPLOY_BIN" summarize-report \
+                --report "${REPORT_DIR}/report.json" \
+                --format github >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
         fi
       env:
+        MODE: ${{ inputs.mode }}
         REPORT_DIR: ${{ inputs.report-dir }}
         PEX_ROOT: ${{ runner.temp }}/ssh-archive-deploy-pex
         SSH_ARCHIVE_DEPLOY_BIN: ${{ steps.install.outputs.binary }}

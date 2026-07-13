@@ -9,21 +9,42 @@ support.
 > [!WARNING]
 > This project is experimental. Its configuration, remote requirements, and
 > mutating deployment guarantees may change while it is evaluated against real
-> managed-hosting environments. Start with the read-only `report` mode, verify
-> the target server capabilities, and do not use `apply` or `rollback` for
-> unattended production deployments without project-specific validation.
+> managed-hosting environments. Start with the read-only `doctor` and `report`
+> modes, verify the target server capabilities, and do not use `apply` or
+> `rollback` for unattended production deployments without project-specific
+> validation.
 
 - `build` creates an archive from git-tracked, allowlisted files.
 - `validate` checks the archive and manifest safety contract.
+- `doctor` inventories remote capabilities without writing to the server.
 - `report` compares the archive with the remote server over SSH.
+- `summarize-doctor` renders the doctor JSON as Markdown for GitHub Actions.
 - `summarize-report` renders the JSON report as Markdown for GitHub Actions.
 - `apply` writes the archive with the configured `overlay` strategy.
 - `rollback` supports `latest` to undo the latest successful `apply`.
 
 ## GitHub Action
 
-Start with a manual report workflow. Do not wire automatic deploys until the
-repository has been reconciled with the server state.
+Start with manual `doctor` and `report` workflows. Do not wire automatic deploys
+until the server capabilities are understood and the repository has been
+reconciled with the server state.
+
+Run `doctor` before packaging or mutation:
+
+```yaml
+- uses: coopTilleuls/ssh-archive-deploy@v0
+  with:
+    mode: doctor
+    config: deploy.yml
+    target-name: production
+    report-dir: dist/deploy-doctor
+    ssh-host: ${{ secrets.SSH_HOST }}
+    ssh-user: ${{ secrets.SSH_USER }}
+    ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    ssh-known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+```
+
+Then generate and archive the drift report:
 
 ```yaml
 name: Deployment Report
@@ -59,10 +80,15 @@ jobs:
 ```
 
 The action configures Python 3.12, downloads the matching PEX from the GitHub
-Release, verifies its SHA-256 checksum and GitHub Artifact Attestation, builds
-the archive, and runs the CLI. The attestation must come from this repository's
-release workflow and match the immutable version tag commit. It does not
-install `uv` or resolve Python dependencies at workflow runtime.
+Release, verifies its SHA-256 checksum and GitHub Artifact Attestation, and runs
+the CLI. `doctor` skips archive construction; `report` and `apply` build it. The
+attestation must come from this repository's release workflow and match the
+immutable version tag commit. The action does not install `uv` or resolve Python
+dependencies at workflow runtime.
+
+In `doctor` mode, `doctor-report` exposes the path to the versioned JSON result
+and the job summary shows the target label and compatibility verdict. The label
+must be non-secret; SSH host and credential values are not written to the result.
 
 In `report` mode, the job summary shows the global and per-scope drift counters
 directly in the GitHub Actions UI. The `deploy-report` artifact remains the
@@ -170,6 +196,25 @@ uv run ssh-archive-deploy report \
   --ssh-known-hosts-file "$SSH_KNOWN_HOSTS_FILE"
 ```
 
+Inspect remote capabilities without building an archive:
+
+```bash
+uv run ssh-archive-deploy doctor \
+  --config deploy.yml \
+  --target-name production \
+  --output dist/deploy-doctor/doctor.json \
+  --ssh-host "$SSH_HOST" \
+  --ssh-user "$SSH_USER" \
+  --ssh-private-key-file "$SSH_PRIVATE_KEY_FILE" \
+  --ssh-known-hosts-file "$SSH_KNOWN_HOSTS_FILE"
+```
+
+`doctor` checks the portable `sh`, `tar`, `cp`, `mkdir`, and `rm` profile,
+inventories optional accelerators, observes `remote.root` and `remote.workdir`
+permissions, and reports untested tar versions as `undetermined`. It never tests
+workdir writability by creating a file; actual write access remains an `apply`
+preflight responsibility.
+
 Render the report as GitHub-flavored Markdown:
 
 ```bash
@@ -207,8 +252,10 @@ SSH commands also read settings from these environment variables:
 - `SSH_KNOWN_HOSTS_FILE`
 - `SSH_ALIAS`
 
-`SSH_KNOWN_HOSTS_FILE` is required for `apply` and `rollback`. Without it,
-mutating commands fail before opening an SSH session.
+`SSH_KNOWN_HOSTS_FILE` is required by default for every SSH command. For a
+one-off read-only first contact, `doctor` and `report` alone accept the explicit
+`--allow-host-key-discovery` option. This permissive mode does not persist the
+observed key and must not be used as a substitute for pinning it.
 
 Remote `apply` and `rollback` require GNU tar with `--keep-old-files` support.
 No Python runtime is required on the remote server.
@@ -224,6 +271,7 @@ Key guarantees:
 - build input comes from `git ls-files`, so ignored files are not packaged;
 - archive validation rejects unsafe paths, symlinks, device files, and
   unsupported tar entries;
+- `doctor` is read-only and emits only normalized, non-secret capability data;
 - `report` is read-only and does not modify the remote server;
 - secrets are not written to reports.
 

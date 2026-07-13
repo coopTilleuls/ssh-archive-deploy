@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,67 @@ from .harness import (
     run,
     run_cli,
 )
+
+
+@pytest.mark.e2e
+def test_doctor_is_strict_read_only_and_reports_tested_capabilities(tmp_path: Path) -> None:
+    scenario = prepare_scenario(tmp_path, "wordpress-catalog")
+    doctor_report = scenario.project / "dist/deploy-doctor/doctor.json"
+
+    with SshServer(tmp_path, scenario) as ssh_server:
+        before = remote_state_snapshot(ssh_server)
+        result = run_cli(
+            scenario,
+            [
+                "doctor",
+                "--config",
+                str(scenario.config),
+                "--target-name",
+                "e2e-managed-hosting",
+                "--output",
+                str(doctor_report),
+            ],
+            ssh_server=ssh_server,
+        )
+        after = remote_state_snapshot(ssh_server)
+
+    payload = json.loads(doctor_report.read_text(encoding="utf-8"))
+    assert before == after
+    assert payload["schema_version"] == 1
+    assert payload["target"] == {"name": "e2e-managed-hosting"}
+    assert payload["ssh"] == {"host_key_policy": "strict"}
+    assert payload["compatibility"] == "compatible"
+    assert payload["tar"]["implementation"] == "gnu"
+    assert payload["tar"]["version"] == "1.34"
+    assert payload["tar"]["version_status"] == "tested"
+    assert payload["remote"]["root"]["readable"] is True
+    assert payload["remote"]["workdir"]["writable_hint"] is True
+    serialized = doctor_report.read_text(encoding="utf-8") + result.stdout
+    assert "127.0.0.1" not in serialized
+    assert str(ssh_server.key) not in serialized
+
+
+@pytest.mark.e2e
+def test_doctor_requires_known_hosts_by_default(tmp_path: Path) -> None:
+    scenario = prepare_scenario(tmp_path, "wordpress-catalog")
+
+    with SshServer(tmp_path, scenario) as ssh_server:
+        result = run_cli(
+            scenario,
+            [
+                "doctor",
+                "--config",
+                str(scenario.config),
+                "--target-name",
+                "e2e-managed-hosting",
+            ],
+            ssh_server=ssh_server,
+            include_known_hosts=False,
+            check=False,
+        )
+
+    assert result.stdout == ""
+    assert "known_hosts file is required" in result.stderr
 
 
 @pytest.mark.e2e
@@ -583,6 +645,14 @@ def test_apply_fails_when_remote_lock_exists(tmp_path: Path) -> None:
 
 def remote_read(ssh_server: SshServer, path: str) -> str:
     return remote_exec(ssh_server, f"cat {path}").stdout
+
+
+def remote_state_snapshot(ssh_server: SshServer) -> str:
+    return remote_exec(
+        ssh_server,
+        "find /srv/project /srv/deploy -printf '%p\\t%y\\t%s\\n' | sort; "
+        "find /srv/project /srv/deploy -type f -exec sha256sum {} \\; | sort",
+    ).stdout
 
 
 def remote_exec(ssh_server: SshServer, script: str, *, check: bool = True) -> CommandResult:
