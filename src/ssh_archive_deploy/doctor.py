@@ -356,10 +356,10 @@ def evaluate_tar(observations: RemoteObservations) -> TarCapability:
         option for option in REQUIRED_TAR_OPTIONS if not observations.tar_options.get(option, False)
     ]
     tested_version = (implementation, version) in TESTED_TAR_VERSIONS
-    if not tested_version:
-        compatibility = "undetermined"
-    elif missing_options:
+    if missing_options:
         compatibility = "incompatible"
+    elif not tested_version:
+        compatibility = "undetermined"
     else:
         compatibility = "compatible"
 

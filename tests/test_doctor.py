@@ -87,11 +87,23 @@ def test_tar_missing_required_option_is_incompatible() -> None:
     assert diagnostic_codes(result) == ["tar-incompatible"]
 
 
-def test_untested_tar_version_is_undetermined() -> None:
+def test_untested_tar_version_with_missing_option_is_incompatible() -> None:
     observations = observations_with(
         tar_version_line="tar (GNU tar) 1.35",
         tar_options={"--directory": False},
     )
+
+    result = evaluate_doctor(config(), "production", observations, ssh_config())
+
+    assert result.tar.version == "1.35"
+    assert result.tar.version_status == "untested"
+    assert result.tar.compatibility == "incompatible"
+    assert result.compatibility == "incompatible"
+    assert diagnostic_codes(result) == ["tar-incompatible"]
+
+
+def test_untested_tar_version_with_required_options_is_undetermined() -> None:
+    observations = observations_with(tar_version_line="tar (GNU tar) 1.35")
 
     result = evaluate_doctor(config(), "production", observations, ssh_config())
 

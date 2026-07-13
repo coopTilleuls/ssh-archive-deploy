@@ -135,6 +135,8 @@ jobs:
         run: |
           set -euo pipefail
           dist/release/ssh-archive-deploy-linux-x86_64.pex --help >/dev/null
+          dist/release/ssh-archive-deploy-linux-x86_64.pex doctor --help >/dev/null
+          dist/release/ssh-archive-deploy-linux-x86_64.pex summarize-doctor --help >/dev/null
           (
             cd dist/release
             sha256sum --check ssh-archive-deploy-linux-x86_64.pex.sha256

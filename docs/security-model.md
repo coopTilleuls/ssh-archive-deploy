@@ -38,6 +38,10 @@ accidental data loss.
   and verifies a GitHub Artifact Attestation before execution. The attestation
   must be signed by this repository's release workflow and match the immutable
   version tag commit.
+- Pull-request CI may exercise the local Action with a PEX built from that same
+  checkout. This source-build path is restricted to local root Action calls on
+  `pull_request`, verifies the generated checksum, and is unavailable to remote
+  consumers. It does not replace release checksum or attestation verification.
 - Exact release tags such as `v0.2.1` are protected by immutable releases. Major
   tags such as `v0` are mutable compatibility pointers and are moved only after
   a new exact release is published successfully.

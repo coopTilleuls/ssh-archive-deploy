@@ -56,3 +56,99 @@ jobs:
         run: uv sync
       - name: Build and run PEX E2E tests
         run: mise run test:e2e:pex
+
+      - name: Prepare local Action smoke test
+        if: ${{ github.event_name == 'pull_request' }}
+        id: action-smoke
+        shell: bash
+        env:
+          COMPOSE_PROJECT_NAME: sshadeploy-action-${{ github.run_id }}-${{ github.run_attempt }}
+          E2E_AUTHORIZED_KEYS: ${{ runner.temp }}/ssh-archive-deploy-action/id_ed25519.pub
+          E2E_REMOTE_FIXTURE: ${{ github.workspace }}/tests/fixtures/scenarios/wordpress-catalog/remote
+        run: |
+          set -euo pipefail
+
+          smoke_dir="$RUNNER_TEMP/ssh-archive-deploy-action"
+          mkdir -p "$smoke_dir"
+          ssh-keygen -t ed25519 -N "" -f "$smoke_dir/id_ed25519" -q
+
+          docker compose -f tests/e2e/compose.yml -p "$COMPOSE_PROJECT_NAME" up -d --build
+          port="$(
+            docker compose -f tests/e2e/compose.yml -p "$COMPOSE_PROJECT_NAME" port ssh 22 \
+              | tail -n 1 \
+              | awk -F: '{print $NF}'
+          )"
+          if [ -z "$port" ]; then
+            echo "Cannot resolve the Action smoke-test SSH port." >&2
+            exit 1
+          fi
+
+          known_hosts="$smoke_dir/known_hosts"
+          for _ in {1..100}; do
+            if ssh-keyscan -p "$port" 127.0.0.1 > "$known_hosts" 2>/dev/null \
+              && [ -s "$known_hosts" ]; then
+              break
+            fi
+            sleep 0.1
+          done
+          if [ ! -s "$known_hosts" ]; then
+            docker compose -f tests/e2e/compose.yml -p "$COMPOSE_PROJECT_NAME" logs --no-color
+            echo "Action smoke-test SSH server did not become ready." >&2
+            exit 1
+          fi
+
+          echo "port=${port}" >> "$GITHUB_OUTPUT"
+
+      - name: Run doctor through the local Action
+        if: ${{ github.event_name == 'pull_request' }}
+        id: action-doctor
+        uses: ./
+        with:
+          mode: doctor
+          config: tests/fixtures/scenarios/wordpress-catalog/deploy.yml
+          target-name: ci-pull-request
+          archive: ${{ runner.temp }}/ssh-archive-deploy-action/doctor-must-not-build.tar.gz
+          report-dir: ${{ runner.temp }}/ssh-archive-deploy-action/report
+          ssh-host: 127.0.0.1
+          ssh-user: deploy
+          ssh-port: ${{ steps.action-smoke.outputs.port }}
+        env:
+          SSH_ARCHIVE_DEPLOY_CI_SOURCE_BUILD: "true"
+          SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/ssh-archive-deploy-action/known_hosts
+          SSH_PRIVATE_KEY_FILE: ${{ runner.temp }}/ssh-archive-deploy-action/id_ed25519
+
+      - name: Verify local Action doctor result
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          DOCTOR_REPORT: ${{ steps.action-doctor.outputs.doctor-report }}
+        run: |
+          set -euo pipefail
+
+          expected_report="$RUNNER_TEMP/ssh-archive-deploy-action/report/doctor.json"
+          if [ "$DOCTOR_REPORT" != "$expected_report" ] || [ ! -f "$DOCTOR_REPORT" ]; then
+            echo "Unexpected doctor-report output: $DOCTOR_REPORT" >&2
+            exit 1
+          fi
+          python -c '
+          import json, pathlib, sys
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert payload["schema_version"] == 1
+          assert payload["operation"] == "doctor"
+          assert payload["target"] == {"name": "ci-pull-request"}
+          assert payload["compatibility"] == "compatible"
+          ' "$DOCTOR_REPORT"
+          test ! -e "$RUNNER_TEMP/ssh-archive-deploy-action/doctor-must-not-build.tar.gz"
+          grep -F "## Remote Capability Doctor" "$GITHUB_STEP_SUMMARY"
+          grep -F "ci-pull-request" "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop local Action smoke-test server
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          COMPOSE_PROJECT_NAME: sshadeploy-action-${{ github.run_id }}-${{ github.run_attempt }}
+          E2E_AUTHORIZED_KEYS: ${{ runner.temp }}/ssh-archive-deploy-action/id_ed25519.pub
+          E2E_REMOTE_FIXTURE: ${{ github.workspace }}/tests/fixtures/scenarios/wordpress-catalog/remote
+        run: |
+          docker compose -f tests/e2e/compose.yml -p "$COMPOSE_PROJECT_NAME" \
+            down -v --remove-orphans
