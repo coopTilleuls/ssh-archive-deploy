@@ -139,8 +139,13 @@ jobs:
           assert payload["compatibility"] == "compatible"
           ' "$DOCTOR_REPORT"
           test ! -e "$RUNNER_TEMP/ssh-archive-deploy-action/doctor-must-not-build.tar.gz"
-          grep -F "## Remote Capability Doctor" "$GITHUB_STEP_SUMMARY"
-          grep -F "ci-pull-request" "$GITHUB_STEP_SUMMARY"
+          summary="$(
+            dist/release/ssh-archive-deploy-linux-x86_64.pex summarize-doctor \
+              --report "$DOCTOR_REPORT" \
+              --format github
+          )"
+          [[ "$summary" == *"## Remote Capability Doctor"* ]]
+          [[ "$summary" == *"ci-pull-request"* ]]
 
       - name: Stop local Action smoke-test server
         if: ${{ always() && github.event_name == 'pull_request' }}
