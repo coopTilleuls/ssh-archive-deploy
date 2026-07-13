@@ -51,6 +51,7 @@ class SshConfig:
     alias: str | None
     private_key_file: str | None
     known_hosts_file: str | None
+    allow_host_key_discovery: bool = False
 
 
 def generate_report(
@@ -243,8 +244,20 @@ def ssh_command(ssh: SshConfig) -> list[str]:
                 f"UserKnownHostsFile={ssh.known_hosts_file}",
             ],
         )
+    elif ssh.allow_host_key_discovery:
+        command.extend(
+            [
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+            ]
+        )
     else:
-        command.extend(["-o", "StrictHostKeyChecking=accept-new"])
+        raise DeployError(
+            "SSH known_hosts file is required. Read-only doctor/report may explicitly use "
+            "--allow-host-key-discovery."
+        )
     if ssh.private_key_file:
         command.extend(["-o", "IdentitiesOnly=yes", "-i", ssh.private_key_file])
     if ssh.port:

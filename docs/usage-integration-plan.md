@@ -33,6 +33,8 @@ The current CLI uses Python `argparse` and exposes these commands:
 
 - `build`
 - `validate`
+- `doctor`
+- `summarize-doctor`
 - `report`
 - `summarize-report`
 - `apply`
@@ -159,8 +161,11 @@ The first spec should document only stable user-facing commands and options:
 - global command name and description;
 - `build --config --output --release-id`;
 - `validate --config --archive`;
+- `doctor --config --target-name --output` plus SSH flags and the explicit
+  read-only host-key discovery option;
+- `summarize-doctor --report --format`, currently supporting `github`;
 - `report --config --archive --output-dir`;
-- SSH flags for `report`;
+- SSH flags and the explicit read-only host-key discovery option for `report`;
 - `summarize-report --report --format`, currently supporting `github`;
 - `apply --config --archive` plus SSH flags and `--result-json`;
 - `rollback --config --release` plus SSH flags and `--result-json`.

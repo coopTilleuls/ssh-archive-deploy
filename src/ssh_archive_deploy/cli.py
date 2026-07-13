@@ -14,6 +14,7 @@ from ssh_archive_deploy.deploy import (
     print_rollback_result,
     rollback_deployment,
 )
+from ssh_archive_deploy.doctor import render_doctor_github_summary, run_doctor
 from ssh_archive_deploy.errors import DeployError
 from ssh_archive_deploy.report import SshConfig, generate_report
 from ssh_archive_deploy.summary import render_github_summary
@@ -42,11 +43,21 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--config", required=True)
     validate.add_argument("--archive", required=True)
 
+    doctor = subparsers.add_parser("doctor", help="Inspect remote capabilities read-only.")
+    doctor.add_argument("--config", required=True)
+    doctor.add_argument("--target-name", required=True)
+    doctor.add_argument("--output", default="dist/deploy-doctor/doctor.json")
+    add_ssh_arguments(doctor, allow_host_key_discovery=True)
+
     report = subparsers.add_parser("report", help="Generate a read-only deployment report.")
     report.add_argument("--config", required=True)
     report.add_argument("--archive", required=True)
     report.add_argument("--output-dir", default="dist/deploy-report")
-    add_ssh_arguments(report)
+    add_ssh_arguments(report, allow_host_key_discovery=True)
+
+    summarize_doctor = subparsers.add_parser("summarize-doctor", help="Render a doctor summary.")
+    summarize_doctor.add_argument("--report", required=True)
+    summarize_doctor.add_argument("--format", choices=["github"], default="github")
 
     summarize = subparsers.add_parser("summarize-report", help="Render a report summary.")
     summarize.add_argument("--report", required=True)
@@ -67,13 +78,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def add_ssh_arguments(parser: argparse.ArgumentParser) -> None:
+def add_ssh_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    allow_host_key_discovery: bool = False,
+) -> None:
     parser.add_argument("--ssh-host", default=os.getenv("SSH_HOST"))
     parser.add_argument("--ssh-user", default=os.getenv("SSH_USER"))
     parser.add_argument("--ssh-port", default=os.getenv("SSH_PORT", "22"))
     parser.add_argument("--ssh-alias", default=os.getenv("SSH_ALIAS"))
     parser.add_argument("--ssh-private-key-file", default=os.getenv("SSH_PRIVATE_KEY_FILE"))
     parser.add_argument("--ssh-known-hosts-file", default=os.getenv("SSH_KNOWN_HOSTS_FILE"))
+    if allow_host_key_discovery:
+        parser.add_argument("--allow-host-key-discovery", action="store_true")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -90,25 +107,14 @@ def run(args: argparse.Namespace) -> int:
         print(f"Archive is valid: {args.archive}")
         return 0
 
-    if args.command == "report":
-        config = load_config(args.config)
-        generate_report(
-            config,
-            Path(args.archive),
-            Path(args.output_dir),
-            SshConfig(
-                host=args.ssh_host,
-                user=args.ssh_user,
-                port=args.ssh_port,
-                alias=args.ssh_alias,
-                private_key_file=args.ssh_private_key_file,
-                known_hosts_file=args.ssh_known_hosts_file,
-            ),
-        )
-        return 0
+    if args.command in {"doctor", "report"}:
+        return run_read_only(args)
 
-    if args.command == "summarize-report":
-        print(render_github_summary(Path(args.report)), end="")
+    if args.command in {"summarize-doctor", "summarize-report"}:
+        if args.command == "summarize-doctor":
+            print(render_doctor_github_summary(Path(args.report)), end="")
+        else:
+            print(render_github_summary(Path(args.report)), end="")
         return 0
 
     if args.command == "apply":
@@ -169,6 +175,26 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     raise DeployError(f"Unsupported command: {args.command}")
+
+
+def run_read_only(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    ssh = SshConfig(
+        host=args.ssh_host,
+        user=args.ssh_user,
+        port=args.ssh_port,
+        alias=args.ssh_alias,
+        private_key_file=args.ssh_private_key_file,
+        known_hosts_file=args.ssh_known_hosts_file,
+        allow_host_key_discovery=args.allow_host_key_discovery,
+    )
+    if args.command == "doctor":
+        run_doctor(config, args.target_name, Path(args.output), ssh)
+        return 0
+    if args.command == "report":
+        generate_report(config, Path(args.archive), Path(args.output_dir), ssh)
+        return 0
+    raise DeployError(f"Unsupported read-only command: {args.command}")
 
 
 def write_json(path: Path, payload: dict[str, object]) -> None:

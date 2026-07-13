@@ -1,9 +1,9 @@
 name: SSH Archive Deploy
-description: Build, report, apply, and rollback a scoped deployment archive over SSH.
+description: Inspect, build, report, apply, and rollback a scoped deployment archive over SSH.
 
 inputs:
   mode:
-    description: Deployment mode. Supported values are report, apply, and rollback.
+    description: Deployment mode. Supported values are doctor, report, apply, and rollback.
     required: true
     default: report
   config:
@@ -15,13 +15,16 @@ inputs:
     required: true
     default: dist/site.tar.gz
   report-dir:
-    description: Directory where report artifacts are written.
+    description: Directory where doctor or report artifacts are written.
     required: false
     default: dist/deploy-report
   rollback-release:
     description: Reserved rollback target input.
     required: false
     default: latest
+  target-name:
+    description: Non-secret target label required in doctor mode (for example preproduction).
+    required: false
   ssh-host:
     description: SSH host.
     required: false
@@ -36,8 +39,12 @@ inputs:
     description: SSH private key content.
     required: false
   ssh-known-hosts:
-    description: Known hosts content. Required for apply and rollback.
+    description: Known hosts content. Required by default for every SSH mode.
     required: false
+  ssh-allow-host-key-discovery:
+    description: Explicit permissive host-key discovery for doctor or report only.
+    required: false
+    default: "false"
 outputs:
   release-id:
     description: Release id from the generated manifest.
@@ -46,8 +53,11 @@ outputs:
     description: Manifest path written by the CLI.
     value: ${{ steps.export.outputs.manifest-path }}
   report-dir:
-    description: Report directory.
+    description: Doctor or report directory.
     value: ${{ inputs.report-dir }}
+  doctor-report:
+    description: Doctor JSON report path in doctor mode.
+    value: ${{ inputs.report-dir }}/doctor.json
   transaction-id:
     description: Transaction id written by apply or rollback.
     value: ${{ steps.export.outputs.transaction-id }}
@@ -165,12 +175,45 @@ runs:
       run: |
         set -euo pipefail
 
+        discovery_args=()
+        case "${ALLOW_HOST_KEY_DISCOVERY}" in
+          false)
+            ;;
+          true)
+            case "${MODE}" in
+              doctor|report)
+                discovery_args+=(--allow-host-key-discovery)
+                ;;
+              *)
+                echo "Host-key discovery is only allowed in doctor or report mode." >&2
+                exit 2
+                ;;
+            esac
+            ;;
+          *)
+            echo "ssh-allow-host-key-discovery must be true or false." >&2
+            exit 2
+            ;;
+        esac
+
         case "${MODE}" in
+          doctor)
+            if [ -z "${TARGET_NAME}" ]; then
+              echo "target-name is required in doctor mode." >&2
+              exit 2
+            fi
+            "$SSH_ARCHIVE_DEPLOY_BIN" doctor \
+              --config "${CONFIG}" \
+              --target-name "${TARGET_NAME}" \
+              --output "${REPORT_DIR}/doctor.json" \
+              "${discovery_args[@]}"
+            ;;
           report)
             "$SSH_ARCHIVE_DEPLOY_BIN" report \
               --config "${CONFIG}" \
               --archive "${ARCHIVE}" \
-              --output-dir "${REPORT_DIR}"
+              --output-dir "${REPORT_DIR}" \
+              "${discovery_args[@]}"
             ;;
           apply)
             "$SSH_ARCHIVE_DEPLOY_BIN" apply \
@@ -194,6 +237,8 @@ runs:
         CONFIG: ${{ inputs.config }}
         ARCHIVE: ${{ inputs.archive }}
         REPORT_DIR: ${{ inputs.report-dir }}
+        TARGET_NAME: ${{ inputs.target-name }}
+        ALLOW_HOST_KEY_DISCOVERY: ${{ inputs.ssh-allow-host-key-discovery }}
         ROLLBACK_RELEASE: ${{ inputs.rollback-release }}
         RESULT_JSON: ${{ runner.temp }}/ssh-archive-deploy-result.json
         SSH_HOST: ${{ inputs.ssh-host }}
@@ -202,18 +247,28 @@ runs:
         PEX_ROOT: ${{ runner.temp }}/ssh-archive-deploy-pex
         SSH_ARCHIVE_DEPLOY_BIN: ${{ steps.install.outputs.binary }}
 
-    - name: Write report summary
-      if: ${{ inputs.mode == 'report' }}
+    - name: Write read-only summary
+      if: ${{ inputs.mode == 'doctor' || inputs.mode == 'report' }}
       shell: bash
       run: |
         set -euo pipefail
 
         if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-          "$SSH_ARCHIVE_DEPLOY_BIN" summarize-report \
-            --report "${REPORT_DIR}/report.json" \
-            --format github >> "$GITHUB_STEP_SUMMARY"
+          case "${MODE}" in
+            doctor)
+              "$SSH_ARCHIVE_DEPLOY_BIN" summarize-doctor \
+                --report "${REPORT_DIR}/doctor.json" \
+                --format github >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            report)
+              "$SSH_ARCHIVE_DEPLOY_BIN" summarize-report \
+                --report "${REPORT_DIR}/report.json" \
+                --format github >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
         fi
       env:
+        MODE: ${{ inputs.mode }}
         REPORT_DIR: ${{ inputs.report-dir }}
         PEX_ROOT: ${{ runner.temp }}/ssh-archive-deploy-pex
         SSH_ARCHIVE_DEPLOY_BIN: ${{ steps.install.outputs.binary }}

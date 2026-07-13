@@ -14,6 +14,9 @@ accidental data loss.
 
 ## Remote Access
 
+- `doctor` only observes command availability, normalized tar capabilities, and
+  shell permission tests. It does not create the configured workdir or a write
+  probe; actual writability is verified before a future mutation.
 - `report` runs read-only commands over SSH.
 - `apply` and `rollback` take an exclusive lock under `remote.workdir` before
   mutating the remote document root.
@@ -24,8 +27,12 @@ accidental data loss.
   either still in the pre-apply state or already matches the archive.
 - `rollback latest` refuses to restore over files that changed after apply.
 - SSH keys and known hosts are provided by the consumer repository secrets.
-- `apply` and `rollback` require an explicit known-hosts file and do not use
-  `StrictHostKeyChecking=accept-new`.
+- Every SSH mode requires an explicit known-hosts file by default. Only
+  `doctor` and `report` expose an explicit permissive discovery option; it uses
+  `StrictHostKeyChecking=accept-new` without persisting the observed key.
+- `apply` and `rollback` never accept permissive host-key discovery.
+- Doctor results contain a caller-provided non-secret target label, not the raw
+  SSH host, user, private-key path, or raw remote tool output.
 - Secrets are not written to reports.
 - The GitHub Action downloads the released PEX, verifies its SHA-256 checksum,
   and verifies a GitHub Artifact Attestation before execution. The attestation

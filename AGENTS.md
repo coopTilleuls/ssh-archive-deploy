@@ -24,6 +24,8 @@ together.
 - `src/ssh_archive_deploy/archive.py`: archive creation, manifest writing, and
   archive validation.
 - `src/ssh_archive_deploy/config.py`: deploy YAML parsing and schema validation.
+- `src/ssh_archive_deploy/doctor.py`: read-only remote capability inspection and
+  versioned doctor results.
 - `src/ssh_archive_deploy/planner.py`: drift classification between artifact and
   remote snapshots.
 - `src/ssh_archive_deploy/report.py`: SSH remote snapshot collection and report
@@ -98,7 +100,9 @@ and docs together:
   device files, and unsupported tar entry types.
 - Manifest file lists and checksums must match archive contents.
 - `remote.root` must be absolute and must not be `/`.
-- `report` must stay read-only and must not write to the remote server.
+- `doctor` and `report` must stay read-only and must not write to the remote server.
+- SSH host keys are strict by default; permissive discovery is explicit and
+  limited to `doctor` and `report`.
 - `apply` and `rollback` must require an explicit known-hosts file.
 - Reports must not include secrets.
 - Never commit SSH private keys, real host credentials, or consumer secrets.
