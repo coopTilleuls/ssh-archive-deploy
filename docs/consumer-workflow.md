@@ -153,6 +153,25 @@ scope:
           - autoload.php
 ```
 
+## Git LFS Content
+
+The Action does not download Git LFS objects. When a deployment scope contains
+LFS-managed files, resolve them in the consumer workflow before invoking
+`report` or `apply`:
+
+```yaml
+- uses: actions/checkout@v7
+  with:
+    lfs: true
+
+- name: Materialize Git LFS content
+  run: git lfs checkout
+```
+
+Archive construction and validation reject residual Git LFS v1 pointer content
+in both tracked files and declared generated inputs. The error reports only the
+affected deployment paths, never their contents.
+
 ## Secrets
 
 Required SSH inputs:

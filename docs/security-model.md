@@ -16,6 +16,9 @@ accidental data loss.
   input. The check occurs before exclusions.
 - Manifest validation confines every generated file to its declared target path
   and verifies that declared required paths contribute content.
+- Final package content and existing archives are checked for unresolved Git
+  LFS v1 pointers without requiring the `git-lfs` executable. Failures expose
+  affected deployment paths, not file contents.
 - Archive validation rejects absolute paths, `..`, and unsupported tar entry
   types.
 

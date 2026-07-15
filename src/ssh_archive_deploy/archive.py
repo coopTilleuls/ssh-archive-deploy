@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -19,6 +20,15 @@ from ssh_archive_deploy.errors import DeployError
 MANIFEST_NAME = "DEPLOYMENT_MANIFEST.json"
 MANIFEST_VERSION = 2
 ASCII_CONTROL_CODES = frozenset(range(0x20)) | {0x7F}
+LFS_POINTER_MAX_SIZE = 1024
+LFS_POINTER_VERSIONS = {
+    "http://git-media.io/v/2",
+    "https://git-lfs.github.com/spec/v1",
+    "https://hawser.github.com/spec/v1",
+}
+LFS_POINTER_EXTENSION_PATTERN = re.compile(r"ext-([0-9])-[A-Za-z0-9_].*")
+LFS_POINTER_OID_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
+LFS_POINTER_SIZE_PATTERN = re.compile(r"0|[1-9][0-9]*")
 
 
 @dataclass(frozen=True)
@@ -68,6 +78,7 @@ def build_archive(config: DeployConfig, output: Path, release_id: str | None = N
         package_root = Path(tmp) / "package"
         package_root.mkdir()
         manifest = collect_files(config, repo_root, package_root, release)
+        reject_git_lfs_pointers(package_root, manifest.files)
         manifest_path = package_root / MANIFEST_NAME
         manifest_path.write_text(json.dumps(asdict(manifest), indent=2) + "\n", encoding="utf-8")
         write_archive(package_root, output)
@@ -383,6 +394,7 @@ def validate_archive_file_contents(
     archive_files: dict[str, tarfile.TarInfo],
     manifest_records: dict[str, tuple[int, str]],
 ) -> None:
+    lfs_pointers: list[str] = []
     for path, member in archive_files.items():
         expected_size, expected_sha256 = manifest_records[path]
         if member.size != expected_size:
@@ -391,10 +403,94 @@ def validate_archive_file_contents(
         if file_handle is None:
             raise DeployError(f"Archive file is not readable: {path}")
         digest = hashlib.sha256()
+        pointer_data = bytearray()
         while chunk := file_handle.read(1024 * 1024):
             digest.update(chunk)
+            if member.size < LFS_POINTER_MAX_SIZE:
+                pointer_data.extend(chunk)
         if digest.hexdigest() != expected_sha256:
             raise DeployError(f"Archive file checksum does not match manifest: {path}")
+        if is_git_lfs_pointer(bytes(pointer_data)):
+            lfs_pointers.append(path)
+    raise_for_git_lfs_pointers(lfs_pointers)
+
+
+def reject_git_lfs_pointers(package_root: Path, files: list[ManifestFile]) -> None:
+    lfs_pointers = [
+        item.path for item in files if is_git_lfs_pointer_file(package_root / item.path)
+    ]
+    raise_for_git_lfs_pointers(lfs_pointers)
+
+
+def is_git_lfs_pointer_file(path: Path) -> bool:
+    if path.stat().st_size >= LFS_POINTER_MAX_SIZE:
+        return False
+    return is_git_lfs_pointer(path.read_bytes())
+
+
+def is_git_lfs_pointer(data: bytes) -> bool:
+    text = decode_git_lfs_pointer(data)
+    if text is None:
+        return False
+    entries = parse_git_lfs_pointer_entries(text)
+    return entries is not None and (
+        LFS_POINTER_OID_PATTERN.fullmatch(entries.get("oid", "")) is not None
+        and LFS_POINTER_SIZE_PATTERN.fullmatch(entries.get("size", "")) is not None
+    )
+
+
+def decode_git_lfs_pointer(data: bytes) -> str | None:
+    if not data or len(data) >= LFS_POINTER_MAX_SIZE:
+        return None
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if not text.endswith("\n") or "\r" in text:
+        return None
+    return text
+
+
+def parse_git_lfs_pointer_entries(text: str) -> dict[str, str] | None:
+    lines = text.removesuffix("\n").split("\n")
+    if not lines or not has_supported_lfs_pointer_version(lines[0]):
+        return None
+
+    entries: dict[str, str] = {}
+    keys: list[str] = []
+    extension_priorities: set[str] = set()
+    for line in lines[1:]:
+        if " " not in line:
+            return None
+        key, value = line.split(" ", 1)
+        if not value or value.startswith(" ") or key in entries:
+            return None
+        if key not in {"oid", "size"}:
+            extension_match = LFS_POINTER_EXTENSION_PATTERN.fullmatch(key)
+            if (
+                extension_match is None
+                or extension_match[1] in extension_priorities
+                or LFS_POINTER_OID_PATTERN.fullmatch(value) is None
+            ):
+                return None
+            extension_priorities.add(extension_match[1])
+        entries[key] = value
+        keys.append(key)
+    if keys != sorted(keys):
+        return None
+    return entries
+
+
+def has_supported_lfs_pointer_version(line: str) -> bool:
+    if not line.startswith("version "):
+        return False
+    version_key, version = line.split(" ", 1)
+    return version_key == "version" and version in LFS_POINTER_VERSIONS
+
+
+def raise_for_git_lfs_pointers(paths: list[str]) -> None:
+    if paths:
+        raise DeployError("Unresolved Git LFS pointer content: " + ", ".join(sorted(paths)))
 
 
 def collect_files(
