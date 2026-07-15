@@ -98,7 +98,7 @@ def validate_archive(archive: Path, config: DeployConfig | None = None) -> None:
         if manifest_member is None:
             raise DeployError("Archive manifest is not readable.")
         manifest = json.loads(manifest_member.read().decode("utf-8"))
-        manifest_records = manifest_file_records(manifest)
+        manifest_records = manifest_file_records(manifest, config)
 
         archive_files = archive_file_members(members)
         manifest_paths = set(manifest_records)
@@ -124,7 +124,10 @@ def first_duplicate_name(names: list[str]) -> str | None:
     return None
 
 
-def manifest_file_records(manifest: object) -> dict[str, tuple[int, str]]:
+def manifest_file_records(
+    manifest: object,
+    config: DeployConfig | None = None,
+) -> dict[str, tuple[int, str]]:
     if not isinstance(manifest, dict):
         raise DeployError("Archive manifest must be a JSON object.")
     version = manifest.get("version")
@@ -154,76 +157,192 @@ def manifest_file_records(manifest: object) -> dict[str, tuple[int, str]]:
             raise DeployError(f"Archive manifest contains duplicate path: {path}")
         records[path] = (size, sha256)
         file_scopes[path] = scope
-    validate_manifest_scope_metadata(manifest, file_scopes)
+    validate_manifest_scope_metadata(manifest, file_scopes, config)
     return records
 
 
 def validate_manifest_scope_metadata(
     manifest: dict[object, object],
     file_scopes: dict[str, str],
+    config: DeployConfig | None = None,
 ) -> None:
+    validate_manifest_project(manifest, config)
     raw_scopes = manifest.get("scopes")
     if not isinstance(raw_scopes, list):
         raise DeployError("Archive manifest scopes must be a list.")
 
+    configured_scopes: dict[str, ScopeConfig] = (
+        {scope.name: scope for scope in config.scopes} if config else {}
+    )
     scope_names: set[str] = set()
     declared_file_scopes: dict[str, str] = {}
     for raw_scope in raw_scopes:
-        if not isinstance(raw_scope, dict):
-            raise DeployError("Archive manifest scope entry must be an object.")
-        name = raw_scope.get("name")
-        raw_scope_files = raw_scope.get("files")
-        raw_generated = raw_scope.get("generated")
-        if not isinstance(name, str) or not isinstance(raw_scope_files, list):
-            raise DeployError("Archive manifest scope entry is incomplete.")
+        name, source, target, scope_files, raw_generated = parse_manifest_scope(raw_scope)
         if name in scope_names:
             raise DeployError(f"Archive manifest contains duplicate scope: {name}")
         scope_names.add(name)
-        scope_files = string_set(raw_scope_files, "Archive manifest scope files")
-        for scope_file in scope_files:
-            if scope_file in declared_file_scopes:
-                raise DeployError("Archive manifest assigns a file to multiple scopes.")
-            declared_file_scopes[scope_file] = name
-        if not isinstance(raw_generated, list):
-            raise DeployError("Archive manifest generated inputs must be a list.")
-        validate_manifest_generated_inputs(raw_generated, scope_files)
+        record_manifest_scope_files(name, target, scope_files, declared_file_scopes)
+        generated_contract = validate_manifest_generated_inputs(raw_generated, scope_files, target)
+        if config is not None:
+            validate_manifest_scope_config(
+                name,
+                source,
+                target,
+                generated_contract,
+                configured_scopes,
+            )
 
     if declared_file_scopes != file_scopes:
         raise DeployError("Archive manifest scope file lists do not match manifest files.")
+    if config is not None and scope_names != set(configured_scopes):
+        raise DeployError("Archive manifest scopes do not match configuration.")
+
+
+def validate_manifest_project(
+    manifest: dict[object, object],
+    config: DeployConfig | None,
+) -> None:
+    project = manifest.get("project")
+    if not isinstance(project, str) or not project:
+        raise DeployError("Archive manifest project must be a non-empty string.")
+    if config is not None and project != config.project:
+        raise DeployError("Archive manifest project does not match configuration.")
+
+
+def parse_manifest_scope(
+    raw_scope: object,
+) -> tuple[str, str, str, set[str], list[object]]:
+    if not isinstance(raw_scope, dict):
+        raise DeployError("Archive manifest scope entry must be an object.")
+    name = raw_scope.get("name")
+    source = raw_scope.get("source")
+    target = raw_scope.get("target")
+    raw_scope_files = raw_scope.get("files")
+    raw_generated = raw_scope.get("generated")
+    if (
+        not isinstance(name, str)
+        or not name
+        or not isinstance(source, str)
+        or not isinstance(target, str)
+        or not isinstance(raw_scope_files, list)
+        or not isinstance(raw_generated, list)
+    ):
+        raise DeployError("Archive manifest scope entry is incomplete.")
+    validate_manifest_relative_path(source, "Archive manifest scope source", allow_dot=True)
+    validate_manifest_relative_path(target, "Archive manifest scope target", allow_dot=True)
+    return (
+        name,
+        source,
+        target,
+        string_set(raw_scope_files, "Archive manifest scope files"),
+        raw_generated,
+    )
+
+
+def record_manifest_scope_files(
+    name: str,
+    target: str,
+    scope_files: set[str],
+    declared_file_scopes: dict[str, str],
+) -> None:
+    for scope_file in scope_files:
+        validate_manifest_relative_path(scope_file, "Archive manifest scope file")
+        if not path_in_target(scope_file, target):
+            raise DeployError(f"Archive manifest scope file is outside its target: {scope_file}")
+        if scope_file in declared_file_scopes:
+            raise DeployError("Archive manifest assigns a file to multiple scopes.")
+        declared_file_scopes[scope_file] = name
+
+
+def validate_manifest_scope_config(
+    name: str,
+    source: str,
+    target: str,
+    generated_contract: dict[str, frozenset[str]],
+    configured_scopes: dict[str, ScopeConfig],
+) -> None:
+    configured_scope = configured_scopes.get(name)
+    if configured_scope is None:
+        raise DeployError(f"Archive manifest contains unconfigured scope: {name}")
+    if source != configured_scope.source or target != configured_scope.target:
+        raise DeployError(f"Archive manifest scope mapping does not match configuration: {name}")
+    expected_generated = {
+        generated.path: frozenset(generated.required_paths)
+        for generated in configured_scope.generated
+    }
+    if generated_contract != expected_generated:
+        raise DeployError(f"Archive manifest generated inputs do not match configuration: {name}")
 
 
 def validate_manifest_generated_inputs(
     raw_generated: list[object],
     scope_files: set[str],
-) -> None:
+    scope_target: str,
+) -> dict[str, frozenset[str]]:
     generated_paths: set[str] = set()
     generated_files: set[str] = set()
-    for raw_input in raw_generated:
-        if not isinstance(raw_input, dict):
-            raise DeployError("Archive manifest generated input must be an object.")
-        path = raw_input.get("path")
-        required_paths = raw_input.get("required_paths")
-        raw_files = raw_input.get("files")
-        if not isinstance(path, str) or not isinstance(required_paths, list):
-            raise DeployError("Archive manifest generated input is incomplete.")
+    generated_contract: dict[str, frozenset[str]] = {}
+    parsed_inputs = [parse_manifest_generated_input(raw_input) for raw_input in raw_generated]
+    for path, _, _ in parsed_inputs:
         if path in generated_paths:
             raise DeployError(f"Archive manifest contains duplicate generated input: {path}")
+        for previous_path in generated_paths:
+            if paths_overlap(path, previous_path):
+                raise DeployError(
+                    "Archive manifest generated input paths must not overlap: "
+                    f"{previous_path} and {path}"
+                )
         generated_paths.add(path)
-        validate_manifest_relative_path(path, "Archive manifest generated input path")
-        for required_path in string_set(
-            required_paths,
-            "Archive manifest generated required paths",
-        ):
-            validate_manifest_relative_path(
-                required_path,
-                "Archive manifest generated required path",
-            )
-        files = string_set(raw_files, "Archive manifest generated files")
+
+    for path, required_path_set, files in parsed_inputs:
         if not files.issubset(scope_files):
             raise DeployError("Archive manifest generated files are outside their scope.")
+        target_prefix = target_relative_path(scope_target, path)
+        if any(not path_in_target(file, target_prefix) for file in files):
+            raise DeployError(
+                f"Archive manifest generated files are outside their declared path: {path}"
+            )
+        expected_files = {file for file in scope_files if path_in_target(file, target_prefix)}
+        if files != expected_files:
+            raise DeployError(
+                f"Archive manifest generated file list is incomplete for declared path: {path}"
+            )
+        for required_path in required_path_set:
+            required_prefix = f"{target_prefix}/{required_path}"
+            if not any(path_in_target(file, required_prefix) for file in files):
+                raise DeployError(
+                    "Archive manifest generated required path does not contribute content: "
+                    f"{path}/{required_path}"
+                )
         if generated_files.intersection(files):
             raise DeployError("Archive manifest assigns a file to multiple generated inputs.")
         generated_files.update(files)
+        generated_contract[path] = frozenset(required_path_set)
+    return generated_contract
+
+
+def parse_manifest_generated_input(raw_input: object) -> tuple[str, set[str], set[str]]:
+    if not isinstance(raw_input, dict):
+        raise DeployError("Archive manifest generated input must be an object.")
+    path = raw_input.get("path")
+    required_paths = raw_input.get("required_paths")
+    raw_files = raw_input.get("files")
+    if not isinstance(path, str) or not isinstance(required_paths, list):
+        raise DeployError("Archive manifest generated input is incomplete.")
+    validate_manifest_relative_path(path, "Archive manifest generated input path")
+    required_path_set = string_set(
+        required_paths,
+        "Archive manifest generated required paths",
+    )
+    for required_path in required_path_set:
+        validate_manifest_relative_path(
+            required_path,
+            "Archive manifest generated required path",
+        )
+    files = string_set(raw_files, "Archive manifest generated files")
+    if not files:
+        raise DeployError("Archive manifest generated input must contribute at least one file.")
+    return path, required_path_set, files
 
 
 def string_set(value: object, name: str) -> set[str]:
@@ -234,12 +353,12 @@ def string_set(value: object, name: str) -> set[str]:
     return set(value)
 
 
-def validate_manifest_relative_path(value: str, name: str) -> None:
+def validate_manifest_relative_path(value: str, name: str, *, allow_dot: bool = False) -> None:
     validate_line_safe_path(value, name)
     parts = PurePosixPath(value).parts
     if (
         not value
-        or value == "."
+        or (value == "." and not allow_dot)
         or value.startswith("/")
         or "\\" in value
         or "." in parts
@@ -287,10 +406,12 @@ def collect_files(
     files: list[ManifestFile] = []
     manifest_scopes: list[ManifestScope] = []
     seen_targets: set[str] = set()
+    repository_tracked = set(git_tracked_files(repo_root, "."))
 
     for scope in config.scopes:
+        for generated in scope.generated:
+            validate_generated_input_not_tracked(scope, generated, repository_tracked)
         tracked = git_tracked_files(repo_root, scope.source)
-        tracked_set = set(tracked)
         selected = [path for path in tracked if include_source_file(config, scope, path)]
 
         scope_files: list[str] = []
@@ -326,8 +447,6 @@ def collect_files(
 
             generated_targets: list[str] = []
             for source_path in selected_generated:
-                if source_path in tracked_set:
-                    raise DeployError(f"Generated input overlaps a Git-tracked file: {source_path}")
                 target_path = package_source_file(
                     repo_root,
                     package_root,
@@ -440,6 +559,20 @@ def collect_generated_input_files(
     return [path.relative_to(repo_root).as_posix() for path in regular_files_under(generated_root)]
 
 
+def validate_generated_input_not_tracked(
+    scope: ScopeConfig,
+    generated: GeneratedInputConfig,
+    tracked_files: set[str],
+) -> None:
+    generated_source = source_relative_path(scope, generated.path)
+    for tracked_file in sorted(tracked_files):
+        if paths_overlap(generated_source, tracked_file):
+            raise DeployError(
+                "Generated input overlaps a Git-tracked path: "
+                f"{scope.name}/{generated.path} ({tracked_file})"
+            )
+
+
 def regular_files_under(path: Path) -> list[Path]:
     if path.is_symlink():
         raise DeployError(f"Refusing to package generated symlink: {path}")
@@ -504,6 +637,16 @@ def target_for_source(scope: ScopeConfig, source_path: str) -> str:
     if scope.target == ".":
         return rel
     return f"{scope.target}/{rel}"
+
+
+def target_relative_path(target: str, path: str) -> str:
+    if target == ".":
+        return path
+    return f"{target}/{path}"
+
+
+def paths_overlap(first: str, second: str) -> bool:
+    return path_in_target(first, second) or path_in_target(second, first)
 
 
 def relative_to_source(scope: ScopeConfig, source_path: str) -> str:

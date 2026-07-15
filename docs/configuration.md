@@ -85,6 +85,53 @@ Rules:
 - `backup.baseline_id` names the protected initial server baseline. The baseline
   is created before the first apply when absent and is not removed by retention.
 
+## Archive Manifest Contract
+
+Every archive contains `DEPLOYMENT_MANIFEST.json`. Manifest version 2 records
+the scope of every deployed file and the contribution of each generated input:
+
+```json
+{
+  "version": 2,
+  "tool_version": "0.x.y",
+  "project": "example",
+  "release_id": "release-123",
+  "commit_sha": "<git-sha>",
+  "commit_ref": "main",
+  "build_time": "2026-07-15T12:00:00Z",
+  "scopes": [
+    {
+      "name": "static",
+      "source": "public",
+      "target": ".",
+      "files": ["vendor/autoload.php"],
+      "generated": [
+        {
+          "path": "vendor",
+          "required_paths": ["autoload.php"],
+          "files": ["vendor/autoload.php"]
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "vendor/autoload.php",
+      "scope": "static",
+      "size": 123,
+      "sha256": "<sha256>"
+    }
+  ]
+}
+```
+
+Paths in scope and generated file lists are relative to `remote.root`.
+Generated `path` and `required_paths` remain relative to the scope source and
+generated input, respectively. Validation rejects empty generated
+contributions, files outside the declared generated target, required paths that
+contribute no content, and manifest scopes that differ from the supplied deploy
+configuration. Manifest version 1 is not accepted by the version 2 tool.
+
 ## Doctor Contract
 
 `doctor` reads the deployment configuration but does not require an archive. It

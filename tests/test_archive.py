@@ -15,6 +15,7 @@ from ssh_archive_deploy.archive import (
     MANIFEST_VERSION,
     build_archive,
     first_duplicate_name,
+    manifest_file_records,
     read_manifest_from_archive,
     validate_archive,
 )
@@ -56,6 +57,39 @@ def generated_config(
             ],
         },
     )
+
+
+def manifest_with_generated(
+    generated: list[dict[str, object]],
+    scope_files: list[str],
+) -> dict[str, object]:
+    return {
+        "version": MANIFEST_VERSION,
+        "tool_version": "test",
+        "project": "demo",
+        "release_id": "release-1",
+        "commit_sha": "abc",
+        "commit_ref": "main",
+        "build_time": "2026-01-01T00:00:00Z",
+        "scopes": [
+            {
+                "name": "theme",
+                "source": "theme",
+                "target": "wp-content/themes/demo",
+                "files": scope_files,
+                "generated": generated,
+            },
+        ],
+        "files": [
+            {
+                "path": path,
+                "scope": "theme",
+                "size": 1,
+                "sha256": "0" * 64,
+            }
+            for path in scope_files
+        ],
+    }
 
 
 def test_build_uses_git_tracked_files_and_excludes(
@@ -330,12 +364,220 @@ def test_build_rejects_generated_overlap_with_tracked_file(
     commit_all(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(DeployError, match="overlaps a Git-tracked file"):
+    with pytest.raises(DeployError, match="overlaps a Git-tracked path"):
         build_archive(
             generated_config(generated=[{"path": "vendor"}], include=["index.php"]),
             tmp_path / "site.tar.gz",
             "release-1",
         )
+
+
+def test_build_rejects_excluded_tracked_file_under_generated_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme/vendor").mkdir(parents=True)
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    (tmp_path / "theme/vendor/tracked.php").write_text("tracked\n", encoding="utf-8")
+    commit_all(tmp_path)
+    (tmp_path / "theme/vendor/generated.php").write_text("generated\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError, match="overlaps a Git-tracked path"):
+        build_archive(
+            generated_config(
+                generated=[{"path": "vendor"}],
+                exclude=["vendor/tracked.php"],
+            ),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_build_rejects_generated_input_at_gitlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme").mkdir()
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    commit_all(tmp_path)
+    commit_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (tmp_path / "theme/vendor").mkdir()
+    (tmp_path / "theme/vendor/autoload.php").write_text("autoload\n", encoding="utf-8")
+    subprocess.run(
+        [
+            "git",
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{commit_sha},theme/vendor",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError, match="overlaps a Git-tracked path"):
+        build_archive(
+            generated_config(generated=[{"path": "vendor"}]),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_build_rejects_generated_input_below_gitlink_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme").mkdir()
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    commit_all(tmp_path)
+    commit_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (tmp_path / "theme/vendor/dist/build").mkdir(parents=True)
+    (tmp_path / "theme/vendor/dist/build/app.php").write_text("generated\n", encoding="utf-8")
+    subprocess.run(
+        [
+            "git",
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{commit_sha},theme/vendor",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    monkeypatch.chdir(tmp_path)
+    config = parse_config(
+        {
+            "version": 2,
+            "project": "demo",
+            "remote": {"root": "/var/www/html", "workdir": "/.deploy/demo"},
+            "scope": [
+                {
+                    "name": "vendor",
+                    "source": "theme/vendor/dist",
+                    "target": "vendor/dist",
+                    "generated": [{"path": "build"}],
+                },
+            ],
+        },
+    )
+
+    with pytest.raises(DeployError, match="overlaps a Git-tracked path"):
+        build_archive(config, tmp_path / "site.tar.gz", "release-1")
+
+
+def test_manifest_rejects_empty_generated_input() -> None:
+    manifest = manifest_with_generated(
+        [{"path": "vendor", "required_paths": ["autoload.php"], "files": []}],
+        ["wp-content/themes/demo/index.php"],
+    )
+
+    with pytest.raises(DeployError, match="must contribute at least one file"):
+        manifest_file_records(manifest)
+
+
+def test_manifest_rejects_generated_file_outside_declared_path() -> None:
+    manifest = manifest_with_generated(
+        [
+            {
+                "path": "vendor",
+                "required_paths": [],
+                "files": ["wp-content/themes/demo/index.php"],
+            },
+        ],
+        ["wp-content/themes/demo/index.php"],
+    )
+
+    with pytest.raises(DeployError, match="outside their declared path"):
+        manifest_file_records(manifest)
+
+
+def test_manifest_rejects_incomplete_generated_file_list() -> None:
+    autoload_file = "wp-content/themes/demo/vendor/autoload.php"
+    package_file = "wp-content/themes/demo/vendor/package.php"
+    manifest = manifest_with_generated(
+        [
+            {
+                "path": "vendor",
+                "required_paths": ["autoload.php"],
+                "files": [autoload_file],
+            },
+        ],
+        [autoload_file, package_file],
+    )
+
+    with pytest.raises(DeployError, match="file list is incomplete"):
+        manifest_file_records(manifest)
+
+
+def test_manifest_rejects_required_path_without_contributed_content() -> None:
+    generated_file = "wp-content/themes/demo/vendor/package.php"
+    manifest = manifest_with_generated(
+        [
+            {
+                "path": "vendor",
+                "required_paths": ["autoload.php"],
+                "files": [generated_file],
+            },
+        ],
+        [generated_file],
+    )
+
+    with pytest.raises(DeployError, match="required path does not contribute content"):
+        manifest_file_records(manifest)
+
+
+def test_manifest_rejects_overlapping_generated_inputs() -> None:
+    vendor_file = "wp-content/themes/demo/vendor/autoload.php"
+    composer_file = "wp-content/themes/demo/vendor/composer/installed.php"
+    manifest = manifest_with_generated(
+        [
+            {"path": "vendor", "required_paths": [], "files": [vendor_file]},
+            {
+                "path": "vendor/composer",
+                "required_paths": [],
+                "files": [composer_file],
+            },
+        ],
+        [vendor_file, composer_file],
+    )
+
+    with pytest.raises(DeployError, match="paths must not overlap"):
+        manifest_file_records(manifest)
+
+
+def test_manifest_rejects_generated_contract_different_from_config() -> None:
+    generated_file = "wp-content/themes/demo/vendor/autoload.php"
+    manifest = manifest_with_generated(
+        [
+            {
+                "path": "vendor",
+                "required_paths": ["autoload.php"],
+                "files": [generated_file],
+            },
+        ],
+        [generated_file],
+    )
+    config = generated_config(generated=[{"path": "build"}])
+
+    with pytest.raises(DeployError, match="generated inputs do not match configuration"):
+        manifest_file_records(manifest, config)
 
 
 def test_validate_archive_rejects_manifest_version_one(tmp_path: Path) -> None:

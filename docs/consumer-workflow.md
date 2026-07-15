@@ -101,14 +101,57 @@ and preserves remote-only files. It exposes these outputs:
 For `mode: rollback`, set `rollback-release: latest`. Historical rollback to an
 arbitrary transaction id is not part of the current experimental contract.
 
-Use the moving major tag `@v0` to receive the latest compatible 0.x release
-without changing consumer workflows. Pin an exact release such as `@v0.2.1`
-when a project needs fully immutable action resolution.
+Use the moving major tag `@v0` to receive the latest experimental 0.x release
+without changing consumer workflows. Experimental 0.x releases may contain
+breaking changes. Pin an exact release such as `@v0.2.1` when a project needs
+fully immutable action resolution.
 
 The release workflow publishes immutable releases for exact tags such as
 `v0.2.1`, then moves the major tag, such as `v0`, to the same tested commit.
 The major tag is intentionally mutable and should not be used when a consumer
 requires fully reproducible action resolution.
+
+## Generated Build Products
+
+The Action packages generated inputs declared in `deploy.yml`, but it does not
+build them. Run the project-specific build before `mode: report` or
+`mode: apply`. For a Composer-managed theme:
+
+```yaml
+- uses: actions/checkout@v7
+
+- name: Install theme dependencies
+  run: >-
+    composer install
+    --working-dir=wp-content/themes/example
+    --no-dev
+    --prefer-dist
+    --no-interaction
+
+- uses: coopTilleuls/ssh-archive-deploy@v0
+  with:
+    mode: report
+    config: deploy.yml
+    archive: dist/site.tar.gz
+    report-dir: dist/deploy-report
+    ssh-host: ${{ secrets.SSH_HOST }}
+    ssh-user: ${{ secrets.SSH_USER }}
+    ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    ssh-known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+```
+
+Declare the resulting directory explicitly:
+
+```yaml
+scope:
+  - name: theme
+    source: wp-content/themes/example
+    target: wp-content/themes/example
+    generated:
+      - path: vendor
+        required_paths:
+          - autoload.php
+```
 
 ## Secrets
 

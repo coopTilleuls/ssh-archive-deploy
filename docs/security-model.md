@@ -12,7 +12,10 @@ accidental data loss.
 - Absolute sources and `..` path segments are rejected.
 - Symlinks are rejected for both tracked files and generated inputs.
 - Generated inputs must stay inside their scope source, be non-empty after
-  exclusions, and must not overlap Git-tracked files or another input.
+  exclusions, and must not overlap Git-tracked files, gitlinks, or another
+  input. The check occurs before exclusions.
+- Manifest validation confines every generated file to its declared target path
+  and verifies that declared required paths contribute content.
 - Archive validation rejects absolute paths, `..`, and unsupported tar entry
   types.
 
@@ -47,8 +50,8 @@ accidental data loss.
   `pull_request`, verifies the generated checksum, and is unavailable to remote
   consumers. It does not replace release checksum or attestation verification.
 - Exact release tags such as `v0.2.1` are protected by immutable releases. Major
-  tags such as `v0` are mutable compatibility pointers and are moved only after
-  a new exact release is published successfully.
+  tags such as `v0` are mutable experimental pointers and are moved only after a
+  new exact release is published successfully.
 - The action uses the consumer job `GITHUB_TOKEN` for GitHub CLI release and
   attestation API calls. Consumer workflows should keep the token read-only.
 - E2E tests generate ephemeral SSH client keys and strict `known_hosts` files in
