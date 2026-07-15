@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -15,12 +16,15 @@ from ssh_archive_deploy.archive import (
     MANIFEST_VERSION,
     build_archive,
     first_duplicate_name,
+    is_git_lfs_pointer,
     manifest_file_records,
     read_manifest_from_archive,
     validate_archive,
 )
 from ssh_archive_deploy.config import DeployConfig, parse_config
 from ssh_archive_deploy.errors import DeployError
+
+LFS_FIXTURE_ROOT = Path(__file__).parent / "fixtures/git-lfs"
 
 
 def init_repo(path: Path) -> None:
@@ -129,6 +133,139 @@ def test_build_uses_git_tracked_files_and_excludes(
     validate_archive(archive, config)
     archived_manifest = read_manifest_from_archive(archive)
     assert json.dumps(archived_manifest)
+
+
+def test_build_rejects_unresolved_lfs_pointer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme").mkdir()
+    shutil.copyfile(LFS_FIXTURE_ROOT / "pointer.psd", tmp_path / "theme/image.psd")
+    commit_all(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    config = generated_config(generated=[])
+    archive = tmp_path / "site.tar.gz"
+
+    with pytest.raises(
+        DeployError,
+        match=r"Unresolved Git LFS pointer content: wp-content/themes/demo/image\.psd",
+    ):
+        build_archive(config, archive, "release-1")
+
+    assert not archive.exists()
+
+
+def test_build_accepts_resolved_lfs_content(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme").mkdir()
+    shutil.copyfile(LFS_FIXTURE_ROOT / "resolved.psd", tmp_path / "theme/image.psd")
+    commit_all(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    manifest = build_archive(
+        generated_config(generated=[]),
+        tmp_path / "site.tar.gz",
+        "release-1",
+    )
+
+    assert [item.path for item in manifest.files] == ["wp-content/themes/demo/image.psd"]
+
+
+def test_git_lfs_pointer_detection_is_structural() -> None:
+    pointer = (LFS_FIXTURE_ROOT / "pointer.psd").read_bytes()
+    pointer_with_extension = pointer.replace(
+        b"oid sha256:",
+        b"ext-0-example sha256:4d7a214614ab2935c943f9e0ff69d22e"
+        b"adbb8f32b1258daaa5e2ca24d17e2393\noid sha256:",
+    )
+    pointer_with_uppercase_extension = pointer_with_extension.replace(
+        b"ext-0-example", b"ext-0-Example"
+    )
+    pointer_with_underscore_extension = pointer_with_extension.replace(
+        b"ext-0-example", b"ext-0-example_name"
+    )
+    pointer_with_punctuated_extension = pointer_with_extension.replace(
+        b"ext-0-example", b"ext-0-example-name.v1"
+    )
+    pointer_with_invalid_extension = pointer.replace(
+        b"oid sha256:",
+        b"ext-0-example synthetic-extension\noid sha256:",
+    )
+    pointer_with_unknown_key = pointer.replace(
+        b"oid sha256:",
+        b"aaa value\noid sha256:",
+    )
+    pointer_with_duplicate_extension_priority = pointer.replace(
+        b"oid sha256:",
+        b"ext-0-first sha256:4d7a214614ab2935c943f9e0ff69d22e"
+        b"adbb8f32b1258daaa5e2ca24d17e2393\n"
+        b"ext-0-second sha256:4d7a214614ab2935c943f9e0ff69d22e"
+        b"adbb8f32b1258daaa5e2ca24d17e2393\noid sha256:",
+    )
+
+    assert is_git_lfs_pointer(pointer)
+    assert is_git_lfs_pointer(pointer_with_extension)
+    assert is_git_lfs_pointer(pointer_with_uppercase_extension)
+    assert is_git_lfs_pointer(pointer_with_underscore_extension)
+    assert is_git_lfs_pointer(pointer_with_punctuated_extension)
+    assert not is_git_lfs_pointer(pointer_with_invalid_extension)
+    assert not is_git_lfs_pointer(pointer_with_unknown_key)
+    assert not is_git_lfs_pointer(pointer_with_duplicate_extension_priority)
+    assert not is_git_lfs_pointer(b"Documentation: https://git-lfs.github.com/spec/v1\n")
+    assert not is_git_lfs_pointer(b"\x00\xffbinary content\n")
+    assert not is_git_lfs_pointer(pointer + b"x" * 1024)
+
+
+def test_build_rejects_generated_lfs_pointer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme").mkdir()
+    (tmp_path / "theme/index.php").write_text("ok\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("theme/vendor/\n", encoding="utf-8")
+    commit_all(tmp_path)
+    (tmp_path / "theme/vendor").mkdir()
+    shutil.copyfile(LFS_FIXTURE_ROOT / "pointer.psd", tmp_path / "theme/vendor/image.psd")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(
+        DeployError,
+        match=r"Unresolved Git LFS pointer content: wp-content/themes/demo/vendor/image\.psd",
+    ):
+        build_archive(
+            generated_config(generated=[{"path": "vendor"}]),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+
+def test_build_reports_lfs_pointer_paths_in_sorted_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "theme").mkdir()
+    for name in ["b.psd", "a.psd"]:
+        shutil.copyfile(LFS_FIXTURE_ROOT / "pointer.psd", tmp_path / f"theme/{name}")
+    commit_all(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DeployError) as error:
+        build_archive(
+            generated_config(generated=[]),
+            tmp_path / "site.tar.gz",
+            "release-1",
+        )
+
+    assert str(error.value) == (
+        "Unresolved Git LFS pointer content: "
+        "wp-content/themes/demo/a.psd, wp-content/themes/demo/b.psd"
+    )
 
 
 def test_build_rejects_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -591,6 +728,50 @@ def test_validate_archive_rejects_manifest_version_one(tmp_path: Path) -> None:
         tar.add(manifest_path, arcname=MANIFEST_NAME, recursive=False)
 
     with pytest.raises(DeployError, match="Unsupported archive manifest version"):
+        validate_archive(archive)
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        "https://git-lfs.github.com/spec/v1",
+        "https://hawser.github.com/spec/v1",
+        "http://git-media.io/v/2",
+    ],
+)
+def test_validate_archive_rejects_unresolved_lfs_pointer(
+    tmp_path: Path,
+    version: str,
+) -> None:
+    package = tmp_path / "package"
+    deployed_path = "wp-content/themes/demo/image.psd"
+    deployed_file = package / deployed_path
+    deployed_file.parent.mkdir(parents=True)
+    pointer = (
+        (LFS_FIXTURE_ROOT / "pointer.psd")
+        .read_bytes()
+        .replace(
+            b"https://git-lfs.github.com/spec/v1",
+            version.encode(),
+        )
+    )
+    deployed_file.write_bytes(pointer)
+    manifest = manifest_with_generated([], [deployed_path])
+    manifest["files"] = [
+        {
+            "path": deployed_path,
+            "scope": "theme",
+            "size": len(pointer),
+            "sha256": hashlib.sha256(pointer).hexdigest(),
+        },
+    ]
+    (package / MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
+    archive = tmp_path / "site.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(package / MANIFEST_NAME, arcname=MANIFEST_NAME, recursive=False)
+        tar.add(deployed_file, arcname=deployed_path, recursive=False)
+
+    with pytest.raises(DeployError, match="Unresolved Git LFS pointer content"):
         validate_archive(archive)
 
 

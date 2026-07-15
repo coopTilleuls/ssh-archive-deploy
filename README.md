@@ -280,6 +280,8 @@ loss.
 Key guarantees:
 
 - build input comes from `git ls-files`, so ignored files are not packaged;
+- unresolved Git LFS pointer content is rejected before packaging and during
+  archive validation;
 - archive validation rejects unsafe paths, symlinks, device files, and
   unsupported tar entries;
 - `doctor` is read-only and emits only normalized, non-secret capability data;

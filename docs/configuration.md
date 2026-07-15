@@ -70,6 +70,9 @@ Rules:
 - Generated symlinks, special files, path escapes, and target collisions are
   rejected. The version 2 manifest records which files each generated input
   contributed.
+- Every selected tracked or generated file must contain materialized content.
+  Residual Git LFS v1 pointers are rejected before the archive is written and
+  when an existing archive is validated.
 - `strategy.apply` only accepts `overlay`: files from the archive are written
   over matching remote files, new files are created, and unknown remote files
   are preserved.
