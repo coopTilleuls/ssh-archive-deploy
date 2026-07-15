@@ -14,7 +14,8 @@ support.
 > `rollback` for unattended production deployments without project-specific
 > validation.
 
-- `build` creates an archive from git-tracked, allowlisted files.
+- `build` creates an archive from git-tracked files and explicitly declared
+  generated inputs.
 - `validate` checks the archive and manifest safety contract.
 - `doctor` inventories remote capabilities without writing to the server.
 - `report` compares the archive with the remote server over SSH.
@@ -104,9 +105,10 @@ automatically.
 
 Initial release support is Linux x86_64 only.
 
-Use the moving major tag `@v0` to receive the latest compatible 0.x release
-without changing consumer workflows. Pin an exact release such as `@v0.2.1`
-when a project needs fully immutable action resolution.
+Use the moving major tag `@v0` to receive the latest experimental 0.x release
+without changing consumer workflows. Experimental 0.x releases may contain
+breaking changes. Pin an exact release such as `@v0.2.1` when a project needs
+fully immutable action resolution.
 
 The release workflow publishes immutable releases for exact tags such as
 `v0.2.1`, then moves the major tag, such as `v0`, to the same tested commit.
@@ -118,8 +120,13 @@ published PEX and verify its attestation; no dedicated token input is required.
 
 Consumers define the deployment scope in `deploy.yml`.
 
+> [!IMPORTANT]
+> The unreleased `main` branch uses configuration version 2 and rejects version
+> 1. The latest published release, `v0.2.5`, still uses version 1; keep its
+> configuration until a version 2 release is published.
+
 ```yaml
-version: 1
+version: 2
 
 project: example
 
@@ -143,7 +150,11 @@ exclude:
 ```
 
 See [docs/configuration.md](docs/configuration.md) for the full configuration
-and report schema contract.
+and report schema contract. The `generated` block is optional; declare it only
+for untracked build products that must enter the deployment archive. The Action
+packages declared products but does not build them; see the
+[consumer workflow](docs/consumer-workflow.md#generated-build-products) for a
+Composer example.
 
 ## Report Output
 

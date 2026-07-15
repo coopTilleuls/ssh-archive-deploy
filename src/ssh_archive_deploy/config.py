@@ -8,6 +8,8 @@ import yaml
 
 from ssh_archive_deploy.errors import DeployError
 
+CONFIG_VERSION = 2
+
 
 @dataclass(frozen=True)
 class RemoteConfig:
@@ -28,12 +30,19 @@ class BackupConfig:
 
 
 @dataclass(frozen=True)
+class GeneratedInputConfig:
+    path: str
+    required_paths: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class ScopeConfig:
     name: str
     source: str
     target: str
     include: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
+    generated: list[GeneratedInputConfig] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -62,8 +71,8 @@ def parse_config(raw: dict[str, Any]) -> DeployConfig:
         "config",
     )
     version = require_int(raw, "version")
-    if version != 1:
-        raise DeployError("Only config version=1 is supported.")
+    if version != CONFIG_VERSION:
+        raise DeployError("Only config version=2 is supported; version=1 is not compatible.")
 
     project = require_str(raw, "project")
     remote_raw = require_mapping(raw, "remote")
@@ -125,7 +134,20 @@ def parse_config(raw: dict[str, Any]) -> DeployConfig:
 def parse_scope(index: int, raw: Any) -> ScopeConfig:
     if not isinstance(raw, dict):
         raise DeployError(f"scope[{index}] must be a mapping.")
-    reject_unknown_keys(raw, {"name", "source", "target", "include", "exclude"}, f"scope[{index}]")
+    reject_unknown_keys(
+        raw,
+        {"name", "source", "target", "include", "exclude", "generated"},
+        f"scope[{index}]",
+    )
+
+    generated_raw = raw.get("generated", [])
+    if not isinstance(generated_raw, list):
+        raise DeployError(f"scope[{index}].generated must be a list.")
+    generated = [
+        parse_generated_input(index, generated_index, item)
+        for generated_index, item in enumerate(generated_raw)
+    ]
+    reject_overlapping_generated_inputs(index, generated)
 
     scope = ScopeConfig(
         name=require_str(raw, "name"),
@@ -133,10 +155,46 @@ def parse_scope(index: int, raw: Any) -> ScopeConfig:
         target=normalize_relative_path(require_str(raw, "target"), allow_dot=True),
         include=string_list(raw.get("include", []), f"scope[{index}].include"),
         exclude=string_list(raw.get("exclude", []), f"scope[{index}].exclude"),
+        generated=generated,
     )
     for pattern in [*scope.include, *scope.exclude]:
         validate_relative_pattern(f"scope[{index}] pattern", pattern)
     return scope
+
+
+def parse_generated_input(
+    scope_index: int,
+    generated_index: int,
+    raw: Any,
+) -> GeneratedInputConfig:
+    name = f"scope[{scope_index}].generated[{generated_index}]"
+    if not isinstance(raw, dict):
+        raise DeployError(f"{name} must be a mapping.")
+    reject_unknown_keys(raw, {"path", "required_paths"}, name)
+    path = normalize_relative_path(require_str(raw, "path"), allow_dot=False)
+    required_paths = [
+        normalize_relative_path(item, allow_dot=False)
+        for item in string_list(raw.get("required_paths", []), f"{name}.required_paths")
+    ]
+    if len(required_paths) != len(set(required_paths)):
+        raise DeployError(f"{name}.required_paths must be unique.")
+    return GeneratedInputConfig(path=path, required_paths=required_paths)
+
+
+def reject_overlapping_generated_inputs(
+    scope_index: int,
+    generated: list[GeneratedInputConfig],
+) -> None:
+    for current_index, current in enumerate(generated):
+        for previous in generated[:current_index]:
+            if is_same_or_child(current.path, previous.path) or is_same_or_child(
+                previous.path,
+                current.path,
+            ):
+                raise DeployError(
+                    f"scope[{scope_index}].generated paths must not overlap: "
+                    f"{previous.path} and {current.path}"
+                )
 
 
 def reject_unknown_keys(raw: dict[str, Any], allowed: set[str], name: str) -> None:

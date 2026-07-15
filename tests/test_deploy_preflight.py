@@ -756,7 +756,7 @@ def test_rollback_delete_does_not_follow_parent_symlink_replaced_after_find(
 def config_for(root: Path) -> DeployConfig:
     return parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": str(root), "workdir": str(root.parent / "deploy")},
             "scope": [{"name": "root", "source": ".", "target": "."}],

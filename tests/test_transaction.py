@@ -13,7 +13,7 @@ from ssh_archive_deploy.transaction import (
 def test_transaction_json_roundtrip() -> None:
     config = parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/srv/deploy"},
             "scope": [{"name": "root", "source": ".", "target": "."}],
@@ -56,7 +56,7 @@ def test_transaction_json_roundtrip() -> None:
 def test_transaction_status_update_preserves_identity() -> None:
     config = parse_config(
         {
-            "version": 1,
+            "version": 2,
             "project": "demo",
             "remote": {"root": "/var/www/html", "workdir": "/srv/deploy"},
             "scope": [{"name": "root", "source": ".", "target": "."}],

@@ -156,7 +156,7 @@ def test_github_summary_contains_only_non_secret_target_identity(tmp_path: Path)
 
 def config() -> DeployConfig:
     raw: dict[str, Any] = {
-        "version": 1,
+        "version": 2,
         "project": "example",
         "remote": {"root": "/srv/project", "workdir": "/srv/deploy"},
         "scope": [{"name": "theme", "source": "theme", "target": "theme"}],
