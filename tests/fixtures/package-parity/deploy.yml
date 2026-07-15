@@ -1,0 +1,20 @@
+version: 2
+
+project: package-parity-fixture
+
+remote:
+  root: /var/www/html
+  workdir: /.deploy/package-parity-fixture
+
+scope:
+  - name: aurora
+    source: themes/aurora
+    target: wp-content/themes/aurora
+    generated:
+      - path: vendor
+        required_paths:
+          - autoload.php
+
+  - name: boreal
+    source: themes/boreal
+    target: wp-content/themes/boreal

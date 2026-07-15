@@ -1,0 +1,78 @@
+{
+  "version": 2,
+  "project": "package-parity-fixture",
+  "release_id": "release-parity",
+  "scopes": [
+    {
+      "name": "aurora",
+      "source": "themes/aurora",
+      "target": "wp-content/themes/aurora",
+      "files": [
+        "wp-content/themes/aurora/composer.json",
+        "wp-content/themes/aurora/index.php",
+        "wp-content/themes/aurora/vendor/autoload.php",
+        "wp-content/themes/aurora/vendor/composer/installed.php"
+      ],
+      "generated": [
+        {
+          "path": "vendor",
+          "required_paths": [
+            "autoload.php"
+          ],
+          "files": [
+            "wp-content/themes/aurora/vendor/autoload.php",
+            "wp-content/themes/aurora/vendor/composer/installed.php"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "boreal",
+      "source": "themes/boreal",
+      "target": "wp-content/themes/boreal",
+      "files": [
+        "wp-content/themes/boreal/assets/hero.psd",
+        "wp-content/themes/boreal/style.css"
+      ],
+      "generated": []
+    }
+  ],
+  "files": [
+    {
+      "path": "wp-content/themes/aurora/composer.json",
+      "scope": "aurora",
+      "size": 54,
+      "sha256": "256f4e7ca39e96ae9352557791bd2b4c944ce208cb2bb7e7cbb505e0488d77f6"
+    },
+    {
+      "path": "wp-content/themes/aurora/index.php",
+      "scope": "aurora",
+      "size": 22,
+      "sha256": "b502ee8a5074b8b1dc1df005cdc59694fb428470e30c2b505f269f41a3f61440"
+    },
+    {
+      "path": "wp-content/themes/aurora/vendor/autoload.php",
+      "scope": "aurora",
+      "size": 18,
+      "sha256": "e3a18d7aab12d038391ec3d65609c583a694d4486dda9ca68dbac564f40d130d"
+    },
+    {
+      "path": "wp-content/themes/aurora/vendor/composer/installed.php",
+      "scope": "aurora",
+      "size": 35,
+      "sha256": "f6a53ca1b73d50438cfe4014c882ab06a34aece1ce6cc1608db82b69b266620e"
+    },
+    {
+      "path": "wp-content/themes/boreal/assets/hero.psd",
+      "scope": "boreal",
+      "size": 33,
+      "sha256": "f43567380a6a8fcb43f7b187f784b8ea98b0c1b597dafd5158b63b92485055d1"
+    },
+    {
+      "path": "wp-content/themes/boreal/style.css",
+      "scope": "boreal",
+      "size": 27,
+      "sha256": "38ff44ab57490783d9e9504c91c85fd5db09bcd7f244085692beddbfe68cce3b"
+    }
+  ]
+}
