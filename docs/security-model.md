@@ -52,7 +52,7 @@ accidental data loss.
   checkout. This source-build path is restricted to local root Action calls on
   `pull_request`, verifies the generated checksum, and is unavailable to remote
   consumers. It does not replace release checksum or attestation verification.
-- Exact release tags such as `v0.2.1` are protected by immutable releases. Major
+- Exact release tags such as `v0.3.0` are protected by immutable releases. Major
   tags such as `v0` are mutable experimental pointers and are moved only after a
   new exact release is published successfully.
 - The action uses the consumer job `GITHUB_TOKEN` for GitHub CLI release and
