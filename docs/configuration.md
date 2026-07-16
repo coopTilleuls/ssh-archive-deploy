@@ -3,8 +3,9 @@
 Consumers define deployment scope in a versioned YAML file.
 
 > [!IMPORTANT]
-> Configuration version 2 is currently available on the unreleased `main`
-> branch. Release `v0.2.5` still expects version 1.
+> Release `v0.3.0` uses configuration version 2 and rejects version 1.
+> Consumers upgrading from `v0.2.5` or earlier must migrate their configuration
+> before upgrading.
 
 ```yaml
 version: 2

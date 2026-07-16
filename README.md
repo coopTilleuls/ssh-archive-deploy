@@ -107,11 +107,11 @@ Initial release support is Linux x86_64 only.
 
 Use the moving major tag `@v0` to receive the latest experimental 0.x release
 without changing consumer workflows. Experimental 0.x releases may contain
-breaking changes. Pin an exact release such as `@v0.2.1` when a project needs
+breaking changes. Pin an exact release such as `@v0.3.0` when a project needs
 fully immutable action resolution.
 
 The release workflow publishes immutable releases for exact tags such as
-`v0.2.1`, then moves the major tag, such as `v0`, to the same tested commit.
+`v0.3.0`, then moves the major tag, such as `v0`, to the same tested commit.
 The major tag is intentionally mutable and must not be associated with a GitHub
 Release. The action uses the consumer workflow `GITHUB_TOKEN` to download the
 published PEX and verify its attestation; no dedicated token input is required.
@@ -121,9 +121,9 @@ published PEX and verify its attestation; no dedicated token input is required.
 Consumers define the deployment scope in `deploy.yml`.
 
 > [!IMPORTANT]
-> The unreleased `main` branch uses configuration version 2 and rejects version
-> 1. The latest published release, `v0.2.5`, still uses version 1; keep its
-> configuration until a version 2 release is published.
+> Release `v0.3.0` uses configuration version 2 and rejects version 1.
+> Consumers upgrading from `v0.2.5` or earlier must migrate their configuration
+> before upgrading.
 
 ```yaml
 version: 2
@@ -311,11 +311,11 @@ review instead of being staged.
 Normal releases are created by pushing an exact SemVer tag from `main`:
 
 ```bash
-uv version 0.2.4
+uv version 0.3.0
 git add pyproject.toml uv.lock
-git commit -m "chore: release v0.2.4"
-git tag v0.2.4
-git push origin main v0.2.4
+git commit -m "chore: release v0.3.0"
+git tag v0.3.0
+git push origin main v0.3.0
 ```
 
 The release workflow refuses to publish unless the tag is `vX.Y.Z`, the
