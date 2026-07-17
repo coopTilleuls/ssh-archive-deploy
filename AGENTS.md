@@ -85,6 +85,11 @@ Run `mise run test:e2e:pex` when changing release packaging or the composite
 action runtime. It builds the Linux x86_64 CPython 3.12 PEX and runs the same
 SSH E2E scenarios through that artifact.
 
+Docker and Buildx validations require sandbox permissions that allow writes to
+Docker's state directory, including `~/.docker/buildx`. Request the required
+elevation before the first run; do not treat a sandbox-denied write there as a
+product test failure.
+
 Do not add Docker-dependent tests to the normal `hk check --all` path; keep E2E
 coverage explicit.
 
@@ -118,6 +123,26 @@ Keep public docs short and aligned with the implemented behavior:
 
 Planning notes belong outside public docs unless they describe current behavior
 or a committed contract.
+
+## Release Notes
+
+Prepare substantive release notes before pushing an exact release tag. A
+one-line placeholder such as `Release vX.Y.Z` is not sufficient. Summarize, as
+applicable:
+
+- user-visible features and fixes;
+- breaking changes and required migration steps;
+- security-relevant changes without disclosing exploit details;
+- current platform or operational limitations.
+
+Store the prepared notes in `docs/releases/vX.Y.Z.md` and validate them with
+`scripts/validate_release_notes.py` as documented in the README release
+procedure before creating the release commit or tag.
+
+Keep consumer-specific and private project context out of public release notes.
+Releases are published as immutable, so the notes must be finalized before
+publication. If the release workflow cannot consume prepared notes or generate
+an adequate equivalent, update it before creating the tag.
 
 ## Coding Guidance
 

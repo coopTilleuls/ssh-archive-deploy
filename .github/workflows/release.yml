@@ -121,6 +121,20 @@ jobs:
             ssh-archive-deploy-linux-x86_64.pex.sha256) <(printf '%s\n' "${assets}")
           echo "exists=true" >> "$GITHUB_OUTPUT"
 
+      - name: Validate release notes
+        if: steps.release.outputs.exists != 'true'
+        id: notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes_file="docs/releases/${TAG}.md"
+          uv run python scripts/validate_release_notes.py \
+            --tag "${TAG}" \
+            --file "${notes_file}"
+          echo "path=${notes_file}" >> "$GITHUB_OUTPUT"
+
       - name: Run checks
         if: steps.release.outputs.exists != 'true'
         run: mise run check
@@ -155,6 +169,7 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
           TARGET: ${{ steps.version.outputs.target }}
           EVENT_NAME: ${{ steps.version.outputs.event-name }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.path }}
         shell: bash
         run: |
           set -euo pipefail
@@ -187,7 +202,7 @@ jobs:
           gh release create "${TAG}" \
             --target "${TARGET}" \
             --title "${TAG}" \
-            --notes "Release ${TAG}" \
+            --notes-file "${RELEASE_NOTES}" \
             --draft \
             --verify-tag
           release_created=1
