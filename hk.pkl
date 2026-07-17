@@ -27,6 +27,10 @@ local checks = new Mapping<String, Step> {
     glob = List("action.yml", "action.yaml", ".github/workflows/*.yml", ".github/workflows/*.yaml")
     check = "action-validator {{files}}"
   }
+  ["zizmor"] {
+    glob = List("action.yml", "action.yaml", ".github/workflows/*.yml", ".github/workflows/*.yaml")
+    check = "zizmor --offline --min-confidence high {{files}}"
+  }
   ["trailing-whitespace"] {
     glob = List("*")
     check = "git grep -n '[[:blank:]]$' -- {{files}} && exit 1 || exit 0"

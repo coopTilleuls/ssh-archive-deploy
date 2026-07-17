@@ -311,18 +311,25 @@ review instead of being staged.
 Normal releases are created by pushing an exact SemVer tag from `main`:
 
 ```bash
-uv version 0.3.0
-git add pyproject.toml uv.lock
-git commit -m "chore: release v0.3.0"
-git tag v0.3.0
-git push origin main v0.3.0
+version=0.3.1
+uv version "$version"
+${EDITOR:-vi} "docs/releases/v${version}.md"
+uv run python scripts/validate_release_notes.py \
+  --tag "v${version}" \
+  --file "docs/releases/v${version}.md"
+git add pyproject.toml uv.lock "docs/releases/v${version}.md"
+git commit -m "chore: release v${version}"
+git tag "v${version}"
+git push origin main "v${version}"
 ```
 
 The release workflow refuses to publish unless the tag is `vX.Y.Z`, the
 `pyproject.toml` version matches `X.Y.Z`, and the tagged commit is included in
-`origin/main`. It builds and tests the PEX, creates the GitHub Release as a
-draft, uploads the assets, publishes the immutable release, then moves the
-mutable major tag such as `v0`.
+`origin/main`. Substantive release notes must be committed as
+`docs/releases/vX.Y.Z.md`; the workflow validates and uses that exact file. It
+then builds and tests the PEX, creates the GitHub Release as a draft, uploads
+the assets, publishes the immutable release, and moves the mutable major tag
+such as `v0`.
 
 `workflow_dispatch` remains available as a fallback; it reads the version from
 `pyproject.toml` on `main` and creates the matching `vX.Y.Z` tag during release.

@@ -40,3 +40,13 @@ provenance = "github-attestations"
 [[tools.uv]]
 version = "0.11.26"
 backend = "asdf:uv"
+
+[[tools.zizmor]]
+version = "1.27.0"
+backend = "aqua:zizmorcore/zizmor"
+
+[tools.zizmor."platforms.linux-x64"]
+checksum = "sha256:277f2bd8fd37cf60c42ab7afca6faa884e65440fa31e02b44bdaae60f62a358f"
+url = "https://github.com/zizmorcore/zizmor/releases/download/v1.27.0/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/476453097"
+provenance = "github-attestations"
