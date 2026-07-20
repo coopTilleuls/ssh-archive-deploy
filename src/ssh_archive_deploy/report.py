@@ -178,17 +178,23 @@ def remote_tar_script(config: DeployConfig) -> bytes:
     lines = [
         "set -eu",
         f"cd {quote(config.remote.root)}",
-        'tmp_list="$(mktemp)"',
-        'cleanup() { rm -f "$tmp_list"; }',
-        "trap cleanup EXIT",
+        "set --",
     ]
     for path in includes:
-        lines.append(f"[ ! -e {quote(path)} ] || printf '%s\\n' {quote(path)} >> \"$tmp_list\"")
+        lines.append(f'[ ! -e {quote(path)} ] || set -- "$@" {quote(path)}')
     tar_parts = ["tar", "-czf", "-"]
     for pattern in excludes:
         tar_parts.extend(["--exclude", quote(pattern)])
-    tar_parts.extend(["--files-from", '"$tmp_list"'])
-    lines.append(" ".join(tar_parts))
+    tar_command = " ".join(tar_parts)
+    lines.extend(
+        [
+            'if [ "$#" -eq 0 ]; then',
+            f"  {tar_command} --files-from /dev/null",
+            "else",
+            f'  {tar_command} -- "$@"',
+            "fi",
+        ]
+    )
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
