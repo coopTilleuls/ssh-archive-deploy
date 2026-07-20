@@ -99,6 +99,28 @@ def test_report_happy_path_over_ssh(tmp_path: Path, scenario_name: str) -> None:
 
 
 @pytest.mark.e2e
+def test_report_does_not_require_remote_mktemp(tmp_path: Path) -> None:
+    scenario = prepare_scenario(tmp_path, "wordpress-catalog")
+
+    with SshServer(tmp_path, scenario) as ssh_server:
+        ssh_server.compose(
+            [
+                "exec",
+                "-T",
+                "--user",
+                "root",
+                "ssh",
+                "mv",
+                "/usr/bin/mktemp",
+                "/usr/bin/mktemp.disabled",
+            ]
+        )
+        build_validate_report(scenario, ssh_server)
+
+    assert_report_matches_golden(scenario)
+
+
+@pytest.mark.e2e
 def test_report_fails_with_empty_known_hosts(tmp_path: Path) -> None:
     scenario = prepare_scenario(tmp_path, "wordpress-catalog")
     empty_known_hosts = tmp_path / "empty-known-hosts"

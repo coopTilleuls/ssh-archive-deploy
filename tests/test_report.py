@@ -9,7 +9,7 @@ import pytest
 from ssh_archive_deploy.archive import MANIFEST_NAME, build_archive
 from ssh_archive_deploy.config import parse_config
 from ssh_archive_deploy.planner import ArtifactSnapshot, RemoteSnapshot, compute_plan
-from ssh_archive_deploy.report import write_report
+from ssh_archive_deploy.report import remote_tar_script, write_report
 from ssh_archive_deploy.summary import render_github_summary
 
 
@@ -107,6 +107,30 @@ def test_report_is_grouped_by_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             },
         ],
     }
+
+
+def test_remote_report_stream_does_not_require_mktemp() -> None:
+    config = parse_config(
+        {
+            "version": 2,
+            "project": "demo",
+            "remote": {"root": "/var/www/html", "workdir": "/.deploy/demo"},
+            "scope": [
+                {"name": "theme", "source": "theme", "target": "theme"},
+                {"name": "optional", "source": "optional", "target": "optional"},
+            ],
+        },
+    )
+
+    script = remote_tar_script(config).decode("utf-8")
+
+    assert "mktemp" not in script
+    assert "set --" in script
+    assert '[ ! -e optional ] || set -- "$@" optional' in script
+    assert '[ ! -e theme ] || set -- "$@" theme' in script
+    assert 'if [ "$#" -eq 0 ]; then' in script
+    assert "tar -czf - --files-from /dev/null" in script
+    assert 'tar -czf - -- "$@"' in script
 
 
 def test_planner_classifies_overlay_operations(tmp_path: Path) -> None:
