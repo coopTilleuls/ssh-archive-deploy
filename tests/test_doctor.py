@@ -87,27 +87,46 @@ def test_tar_missing_required_option_is_incompatible() -> None:
     assert diagnostic_codes(result) == ["tar-incompatible"]
 
 
-def test_untested_tar_version_with_missing_option_is_incompatible() -> None:
+@pytest.mark.parametrize(
+    ("version", "expected_status"),
+    [("1.35", "tested"), ("1.36", "untested")],
+)
+def test_tar_version_with_missing_option_is_incompatible(
+    version: str,
+    expected_status: str,
+) -> None:
     observations = observations_with(
-        tar_version_line="tar (GNU tar) 1.35",
+        tar_version_line=f"tar (GNU tar) {version}",
         tar_options={"--directory": False},
     )
 
     result = evaluate_doctor(config(), "production", observations, ssh_config())
 
-    assert result.tar.version == "1.35"
-    assert result.tar.version_status == "untested"
+    assert result.tar.version == version
+    assert result.tar.version_status == expected_status
     assert result.tar.compatibility == "incompatible"
     assert result.compatibility == "incompatible"
     assert diagnostic_codes(result) == ["tar-incompatible"]
 
 
-def test_untested_tar_version_with_required_options_is_undetermined() -> None:
+def test_gnu_tar_1_35_with_required_options_is_compatible() -> None:
     observations = observations_with(tar_version_line="tar (GNU tar) 1.35")
 
     result = evaluate_doctor(config(), "production", observations, ssh_config())
 
     assert result.tar.version == "1.35"
+    assert result.tar.version_status == "tested"
+    assert result.tar.compatibility == "compatible"
+    assert result.compatibility == "compatible"
+    assert result.diagnostics == []
+
+
+def test_untested_tar_version_with_required_options_is_undetermined() -> None:
+    observations = observations_with(tar_version_line="tar (GNU tar) 1.36")
+
+    result = evaluate_doctor(config(), "production", observations, ssh_config())
+
+    assert result.tar.version == "1.36"
     assert result.tar.version_status == "untested"
     assert result.tar.compatibility == "undetermined"
     assert result.compatibility == "undetermined"

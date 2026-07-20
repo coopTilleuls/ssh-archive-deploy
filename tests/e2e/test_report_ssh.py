@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from .harness import (
 def test_doctor_is_strict_read_only_and_reports_tested_capabilities(tmp_path: Path) -> None:
     scenario = prepare_scenario(tmp_path, "wordpress-catalog")
     doctor_report = scenario.project / "dist/deploy-doctor/doctor.json"
+    expected_tar_version = os.environ.get("E2E_EXPECTED_TAR_VERSION", "1.34")
 
     with SshServer(tmp_path, scenario) as ssh_server:
         before = remote_state_snapshot(ssh_server)
@@ -46,8 +48,9 @@ def test_doctor_is_strict_read_only_and_reports_tested_capabilities(tmp_path: Pa
     assert payload["ssh"] == {"host_key_policy": "strict"}
     assert payload["compatibility"] == "compatible"
     assert payload["tar"]["implementation"] == "gnu"
-    assert payload["tar"]["version"] == "1.34"
+    assert payload["tar"]["version"] == expected_tar_version
     assert payload["tar"]["version_status"] == "tested"
+    assert all(payload["tar"]["options"].values())
     assert payload["remote"]["root"]["readable"] is True
     assert payload["remote"]["workdir"]["writable_hint"] is True
     serialized = doctor_report.read_text(encoding="utf-8") + result.stdout

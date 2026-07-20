@@ -37,7 +37,7 @@ OPTIONAL_COMMANDS = (
 REQUIRED_TAR_OPTIONS = ("--create", "--extract", "--file", "--directory", "--gzip")
 
 # Compatibility is deliberately limited to versions exercised by the SSH E2E suite.
-TESTED_TAR_VERSIONS = frozenset({("gnu", "1.34")})
+TESTED_TAR_VERSIONS = frozenset({("gnu", "1.34"), ("gnu", "1.35")})
 
 Compatibility = Literal["compatible", "incompatible", "undetermined"]
 Severity = Literal["error", "warning", "info"]
