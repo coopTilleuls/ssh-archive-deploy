@@ -6,6 +6,11 @@ from typing import Any
 
 import yaml
 
+from ssh_archive_deploy.complete_backup import (
+    BackupScope,
+    validate_identifier,
+    validate_scope_targets,
+)
 from ssh_archive_deploy.errors import DeployError
 
 CONFIG_VERSION = 2
@@ -106,6 +111,7 @@ def parse_config(raw: dict[str, Any]) -> DeployConfig:
     )
     if backup.retention < 1:
         raise DeployError("backup.retention must be a positive integer.")
+    validate_identifier(backup.baseline_id, "backup.baseline_id")
 
     scopes_raw = raw.get("scope")
     if not isinstance(scopes_raw, list) or not scopes_raw:
@@ -115,6 +121,7 @@ def parse_config(raw: dict[str, Any]) -> DeployConfig:
     names = [scope.name for scope in scopes]
     if len(names) != len(set(names)):
         raise DeployError("scope names must be unique.")
+    validate_scope_targets([BackupScope(name=scope.name, target=scope.target) for scope in scopes])
 
     excludes = string_list(raw.get("exclude", []), "exclude")
     for pattern in excludes:

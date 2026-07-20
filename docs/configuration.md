@@ -52,6 +52,8 @@ Rules:
 - `scope[].source` must be relative to the repository root.
 - `scope[].target` must be relative to `remote.root`; use `.` for the remote
   root itself.
+- Scope targets must be distinct and must not contain one another. A root scope
+  using `.` must therefore be the only scope.
 - `include` and `exclude` use shell-style globs.
 - Global excludes are matched against archive paths relative to `remote.root`.
 - Scope excludes are matched both against paths relative to the scope source and
@@ -88,6 +90,11 @@ Rules:
 - `backup.retention` controls how many transaction records are retained.
 - `backup.baseline_id` names the protected initial server baseline. The baseline
   is created before the first apply when absent and is not removed by retention.
+  It must match `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`.
+
+The library also defines and validates the future
+[complete backup format](backup-format.md). The current mutable commands do not
+use that format yet.
 
 ## Archive Manifest Contract
 

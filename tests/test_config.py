@@ -25,6 +25,40 @@ def test_parse_minimal_config() -> None:
     assert config.scopes[0].source == "theme"
 
 
+@pytest.mark.parametrize(
+    "baseline_id",
+    ["", ".", "..", "../escape", "path/value", "bad\nvalue", "a" * 129],
+)
+def test_rejects_unsafe_baseline_identifier(baseline_id: str) -> None:
+    raw = minimal_config()
+    raw["backup"] = {"baseline_id": baseline_id}
+
+    with pytest.raises(DeployError, match="baseline_id"):
+        parse_config(raw)
+
+
+def test_accepts_maximum_length_baseline_identifier() -> None:
+    raw = minimal_config()
+    raw["backup"] = {"baseline_id": "a" * 128}
+
+    assert parse_config(raw).backup.baseline_id == "a" * 128
+
+
+def test_rejects_overlapping_scope_targets() -> None:
+    raw = minimal_config()
+    raw["scope"] = [
+        {"name": "parent", "source": "parent", "target": "wp-content"},
+        {
+            "name": "theme",
+            "source": "theme",
+            "target": "wp-content/themes/example",
+        },
+    ]
+
+    with pytest.raises(DeployError, match="must not overlap"):
+        parse_config(raw)
+
+
 def test_rejects_absolute_source() -> None:
     raw = minimal_config()
     raw["scope"] = [{"name": "bad", "source": "/theme", "target": "theme"}]
