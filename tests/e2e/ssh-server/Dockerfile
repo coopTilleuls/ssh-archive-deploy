@@ -1,4 +1,5 @@
-FROM debian:12.11-slim
+ARG E2E_SSH_BASE_IMAGE=debian:bookworm-slim
+FROM ${E2E_SSH_BASE_IMAGE}
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssh-server \

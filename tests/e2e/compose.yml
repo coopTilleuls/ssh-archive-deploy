@@ -2,6 +2,8 @@ services:
   ssh:
     build:
       context: ./ssh-server
+      args:
+        E2E_SSH_BASE_IMAGE: "${E2E_SSH_BASE_IMAGE:-debian:bookworm-slim}"
     ports:
       - "127.0.0.1::22"
     volumes:

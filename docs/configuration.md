@@ -148,8 +148,9 @@ optional tools are reported but do not reduce compatibility. `tar` compatibility
 uses both its normalized implementation/version and the options found in its
 runtime help. Only implementation/version pairs exercised by SSH E2E tests are
 `compatible`; an otherwise plausible but untested pair is `undetermined`.
-The initial tested matrix contains GNU tar 1.34, as provided by the Debian 12.11
-SSH E2E image.
+The tested matrix contains GNU tar 1.34 on Debian Bookworm and GNU tar 1.35 on
+Debian Trixie. Newer versions are not accepted through an open-ended range: they
+remain `undetermined` until the SSH E2E suite covers them explicitly.
 
 `remote.root` must be an existing readable directory. `remote.workdir` is
 observed with shell permission tests only. Its `writable_hint` is not proof that
