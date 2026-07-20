@@ -24,6 +24,17 @@ support.
 - `apply` writes the archive with the configured `overlay` strategy.
 - `rollback` supports `latest` to undo the latest successful `apply`.
 
+## Documentation
+
+- [Configuration](docs/configuration.md) defines `deploy.yml`, manifests, and
+  command result contracts.
+- [Consumer workflow](docs/consumer-workflow.md) shows complete GitHub Actions
+  integration, generated build products, Git LFS, secrets, and report review.
+- [Security model](docs/security-model.md) documents trust boundaries and local
+  and remote safety guarantees.
+- [Release notes](docs/releases/) describe version-specific changes and
+  migrations.
+
 ## GitHub Action
 
 Start with manual `doctor` and `report` workflows. Do not wire automatic deploys
@@ -45,76 +56,14 @@ Run `doctor` before packaging or mutation:
     ssh-known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
 ```
 
-Then generate and archive the drift report:
+The Action downloads the matching release PEX, verifies its checksum and
+artifact attestation, and runs the CLI without installing project dependencies
+at workflow runtime. Use the moving `@v0` tag for experimental updates or pin an
+exact immutable release for controlled deployments.
 
-```yaml
-name: Deployment Report
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  report:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: coopTilleuls/ssh-archive-deploy@v0
-        with:
-          mode: report
-          config: deploy.yml
-          archive: dist/site.tar.gz
-          report-dir: dist/deploy-report
-          ssh-host: ${{ secrets.SSH_HOST }}
-          ssh-user: ${{ secrets.SSH_USER }}
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-          ssh-known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
-
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: deploy-report
-          path: dist/deploy-report
-```
-
-The action configures Python 3.12, downloads the matching PEX from the GitHub
-Release, verifies its SHA-256 checksum and GitHub Artifact Attestation, and runs
-the CLI. `doctor` skips archive construction; `report` and `apply` build it. The
-attestation must come from this repository's release workflow and match the
-immutable version tag commit. The action does not install `uv` or resolve Python
-dependencies at workflow runtime.
-
-In `doctor` mode, `doctor-report` exposes the path to the versioned JSON result
-and the job summary shows the target label and compatibility verdict. The label
-must be non-secret; SSH host and credential values are not written to the result.
-
-In `report` mode, the job summary shows the global and per-scope drift counters
-directly in the GitHub Actions UI. The `deploy-report` artifact remains the
-detailed file-level output.
-
-Use `mode: apply` only after a clean report has been reviewed for the target
-environment. Apply writes a remote checkpoint under `remote.workdir`, preserves
-remote-only files, and exposes `transaction-id`, `checkpoint-path`, and
-`rollback-command` outputs. Use `mode: rollback` with `rollback-release: latest`
-to undo the latest successful apply transaction. `ssh-known-hosts` is required
-for `apply` and `rollback`; these modes do not accept new host keys
-automatically.
-
-Initial release support is Linux x86_64 only.
-
-Use the moving major tag `@v0` to receive the latest experimental 0.x release
-without changing consumer workflows. Experimental 0.x releases may contain
-breaking changes. Pin an exact release such as `@v0.3.0` when a project needs
-fully immutable action resolution.
-
-The release workflow publishes immutable releases for exact tags such as
-`v0.3.0`, then moves the major tag, such as `v0`, to the same tested commit.
-The major tag is intentionally mutable and must not be associated with a GitHub
-Release. The action uses the consumer workflow `GITHUB_TOKEN` to download the
-published PEX and verify its attestation; no dedicated token input is required.
+See the [consumer workflow](docs/consumer-workflow.md) for report, apply,
+rollback, artifact upload, secrets, generated inputs, and release-resolution
+examples. Initial release support is Linux x86_64 only.
 
 ## Deploy Configuration
 
