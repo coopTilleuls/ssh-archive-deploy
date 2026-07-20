@@ -52,8 +52,6 @@ Rules:
 - `scope[].source` must be relative to the repository root.
 - `scope[].target` must be relative to `remote.root`; use `.` for the remote
   root itself.
-- Scope targets must be distinct and must not contain one another. A root scope
-  using `.` must therefore be the only scope.
 - `include` and `exclude` use shell-style globs.
 - Global excludes are matched against archive paths relative to `remote.root`.
 - Scope excludes are matched both against paths relative to the scope source and

@@ -336,6 +336,23 @@ def test_scope_config_digest_ignores_sources_and_order() -> None:
     assert scope_config_digest(first) == scope_config_digest(second)
 
 
+def test_scope_config_digest_rejects_overlapping_targets() -> None:
+    config = parse_config(
+        {
+            "version": 2,
+            "project": "demo",
+            "remote": {"root": "/srv/www", "workdir": "/srv/deploy"},
+            "scope": [
+                {"name": "root", "source": ".", "target": "."},
+                {"name": "theme", "source": "theme", "target": "wp-content/themes/demo"},
+            ],
+        }
+    )
+
+    with pytest.raises(DeployError, match="must not overlap"):
+        scope_config_digest(config)
+
+
 def test_golden_complete_backup_bundle_is_valid() -> None:
     metadata, manifest = validate_complete_backup_bundle(FIXTURE_DIR)
 

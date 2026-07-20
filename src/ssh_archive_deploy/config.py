@@ -6,11 +6,7 @@ from typing import Any
 
 import yaml
 
-from ssh_archive_deploy.complete_backup import (
-    BackupScope,
-    validate_identifier,
-    validate_scope_targets,
-)
+from ssh_archive_deploy.complete_backup import validate_identifier
 from ssh_archive_deploy.errors import DeployError
 
 CONFIG_VERSION = 2
@@ -121,7 +117,6 @@ def parse_config(raw: dict[str, Any]) -> DeployConfig:
     names = [scope.name for scope in scopes]
     if len(names) != len(set(names)):
         raise DeployError("scope names must be unique.")
-    validate_scope_targets([BackupScope(name=scope.name, target=scope.target) for scope in scopes])
 
     excludes = string_list(raw.get("exclude", []), "exclude")
     for pattern in excludes:

@@ -44,21 +44,6 @@ def test_accepts_maximum_length_baseline_identifier() -> None:
     assert parse_config(raw).backup.baseline_id == "a" * 128
 
 
-def test_rejects_overlapping_scope_targets() -> None:
-    raw = minimal_config()
-    raw["scope"] = [
-        {"name": "parent", "source": "parent", "target": "wp-content"},
-        {
-            "name": "theme",
-            "source": "theme",
-            "target": "wp-content/themes/example",
-        },
-    ]
-
-    with pytest.raises(DeployError, match="must not overlap"):
-        parse_config(raw)
-
-
 def test_rejects_absolute_source() -> None:
     raw = minimal_config()
     raw["scope"] = [{"name": "bad", "source": "/theme", "target": "theme"}]

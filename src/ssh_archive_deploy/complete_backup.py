@@ -260,6 +260,9 @@ def backup_manifest_from_json(raw: str) -> BackupManifest:
 
 
 def scope_config_digest(config: DeployConfig) -> str:
+    validate_scope_targets(
+        tuple(BackupScope(name=scope.name, target=scope.target) for scope in config.scopes)
+    )
     payload = {
         "exclude": sorted(config.exclude),
         "scopes": [
