@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from ssh_archive_deploy.complete_backup import validate_identifier
 from ssh_archive_deploy.errors import DeployError
 
 CONFIG_VERSION = 2
@@ -106,6 +107,7 @@ def parse_config(raw: dict[str, Any]) -> DeployConfig:
     )
     if backup.retention < 1:
         raise DeployError("backup.retention must be a positive integer.")
+    validate_identifier(backup.baseline_id, "backup.baseline_id")
 
     scopes_raw = raw.get("scope")
     if not isinstance(scopes_raw, list) or not scopes_raw:

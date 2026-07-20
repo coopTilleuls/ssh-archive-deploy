@@ -88,6 +88,11 @@ Rules:
 - `backup.retention` controls how many transaction records are retained.
 - `backup.baseline_id` names the protected initial server baseline. The baseline
   is created before the first apply when absent and is not removed by retention.
+  It must match `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`.
+
+The library also defines and validates the future
+[complete backup format](backup-format.md). The current mutable commands do not
+use that format yet.
 
 ## Archive Manifest Contract
 
